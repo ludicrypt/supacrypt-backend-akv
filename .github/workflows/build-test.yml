@@ -1,0 +1,22 @@
+name: Build and Test
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Restore dependencies
+        run: |
+          # dotnet restore steps to be added
+          echo "Restore dependencies placeholder"
+      - name: Build
+        run: |
+          # dotnet build steps to be added
+          echo "Build steps placeholder"
+      - name: Test
+        run: |
+          # dotnet test steps to be added
+          echo "Test steps placeholder"
