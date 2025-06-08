@@ -6,6 +6,7 @@ using Supacrypt.Backend.Configuration;
 using Supacrypt.Backend.Extensions;
 using Supacrypt.Backend.Services;
 using Supacrypt.Backend.Middleware;
+using Supacrypt.Backend.Observability;
 
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
@@ -34,6 +35,9 @@ try
         .ReadFrom.Configuration(context.Configuration)
         .Enrich.FromLogContext()
         .WriteTo.Console(new Serilog.Formatting.Compact.CompactJsonFormatter()));
+
+    // Add observability services (before other services for proper instrumentation)
+    builder.Services.AddSupacryptObservability(builder.Configuration, builder.Environment);
 
     // Add security services
     builder.Services.AddSupacryptSecurity(builder.Configuration);

@@ -7,6 +7,8 @@ using Supacrypt.Backend.Services.Interfaces;
 using Supacrypt.Backend.ErrorHandling;
 using Supacrypt.Backend.Logging;
 using Supacrypt.Backend.Telemetry;
+using Supacrypt.Backend.Observability.Metrics;
+using Supacrypt.Backend.Observability.Tracing;
 using System.Diagnostics;
 
 namespace Supacrypt.Backend.Services;
@@ -18,6 +20,7 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
     private readonly ICryptographicOperations _cryptographicOperations;
     private readonly ILogger<SupacryptGrpcService> _logger;
     private readonly PerformanceTracker _performanceTracker;
+    private readonly CryptoMetrics _cryptoMetrics;
     
     private readonly IValidator<GenerateKeyRequest> _generateKeyValidator;
     private readonly IValidator<SignDataRequest> _signDataValidator;
@@ -33,6 +36,7 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
         ICryptographicOperations cryptographicOperations,
         ILogger<SupacryptGrpcService> logger,
         PerformanceTracker performanceTracker,
+        CryptoMetrics cryptoMetrics,
         IValidator<GenerateKeyRequest> generateKeyValidator,
         IValidator<SignDataRequest> signDataValidator,
         IValidator<VerifySignatureRequest> verifySignatureValidator,
@@ -46,6 +50,7 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
         _cryptographicOperations = cryptographicOperations;
         _logger = logger;
         _performanceTracker = performanceTracker;
+        _cryptoMetrics = cryptoMetrics;
         _generateKeyValidator = generateKeyValidator;
         _signDataValidator = signDataValidator;
         _verifySignatureValidator = verifySignatureValidator;
@@ -112,8 +117,20 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
         ServerCallContext context)
     {
         var correlationId = GetOrCreateCorrelationId(context);
+        using var activity = ActivitySources.GrpcService.StartActivity("SignData");
         using var performanceTracker = _performanceTracker.BeginOperation("SignData", correlationId, request.KeyId);
         using var operationLogger = new OperationLogger(_logger, "SignData", correlationId, request.KeyId);
+
+        // Enrich activity with request context
+        if (activity != null)
+        {
+            TracingEnricher.EnrichGrpcOperation(activity, "SignData", context);
+            TracingEnricher.EnrichCryptoOperation(activity, "sign", request.KeyId, request.Algorithm.ToString());
+            TracingEnricher.SetCorrelationContext(activity, correlationId);
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        _cryptoMetrics.RecordActiveOperationStart("sign");
 
         try
         {
@@ -127,6 +144,13 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
             {
                 var errors = string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage));
                 operationLogger.LogValidationFailure(errors);
+                
+                if (activity != null)
+                {
+                    activity.SetStatus(ActivityStatusCode.Error, "Validation failed");
+                    activity.SetTag("validation.error", errors);
+                }
+                
                 throw new RpcException(new Status(StatusCode.InvalidArgument, errors));
             }
 
@@ -136,25 +160,63 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
                 context.CancellationToken)
                 .ConfigureAwait(false);
 
-            if (result.Success != null)
+            stopwatch.Stop();
+            var success = result.Success != null;
+
+            // Record metrics
+            _cryptoMetrics.RecordSignOperation(
+                request.KeyId, 
+                request.Algorithm.ToString(), 
+                stopwatch.Elapsed, 
+                success,
+                request.Data.Length,
+                result.Success?.Signature.Length);
+
+            if (success)
             {
-                operationLogger.LogSuccess(new { SignatureSize = result.Success.Signature.Length });
+                operationLogger.LogSuccess(new { SignatureSize = result.Success!.Signature.Length });
                 performanceTracker.MarkSuccess();
                 operationLogger.LogInformation("Data signing completed: SignatureSize={SignatureSize}bytes", 
                     result.Success.Signature.Length);
+                
+                if (activity != null)
+                {
+                    activity.SetTag("signature.size", result.Success.Signature.Length);
+                    activity.SetStatus(ActivityStatusCode.Ok);
+                }
             }
 
             return result;
         }
-        catch (RpcException)
+        catch (RpcException ex)
         {
+            stopwatch.Stop();
+            _cryptoMetrics.RecordSignOperation(request.KeyId, request.Algorithm.ToString(), stopwatch.Elapsed, false, request.Data.Length);
+            
+            if (activity != null)
+            {
+                TracingEnricher.RecordException(activity, ex);
+            }
+            
             throw;
         }
         catch (Exception ex)
         {
+            stopwatch.Stop();
+            _cryptoMetrics.RecordSignOperation(request.KeyId, request.Algorithm.ToString(), stopwatch.Elapsed, false, request.Data.Length);
+            
+            if (activity != null)
+            {
+                TracingEnricher.RecordException(activity, ex);
+            }
+            
             operationLogger.LogFailure(ex);
             var status = ErrorMapper.MapToGrpcStatus(ex, correlationId);
             throw new RpcException(status);
+        }
+        finally
+        {
+            _cryptoMetrics.RecordActiveOperationEnd("sign");
         }
     }
 

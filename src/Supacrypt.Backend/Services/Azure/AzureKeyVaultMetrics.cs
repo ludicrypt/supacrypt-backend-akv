@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+using Supacrypt.Backend.Observability.Metrics;
 
 namespace Supacrypt.Backend.Services.Azure;
 
