@@ -1,5 +1,8 @@
 using Microsoft.Extensions.Options;
+using Microsoft.AspNetCore.Authentication.Certificate;
 using Supacrypt.Backend.Configuration;
+using Supacrypt.Backend.Services.Security;
+using Supacrypt.Backend.Services.Security.Interfaces;
 
 namespace Supacrypt.Backend.Extensions;
 
@@ -20,6 +23,44 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<IValidateOptions<AzureKeyVaultOptions>, AzureKeyVaultOptionsValidator>();
 
+        return services;
+    }
+
+    public static IServiceCollection AddSupacryptSecurity(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.Configure<SecurityOptions>(configuration.GetSection(SecurityOptions.SectionName));
+        
+        services.AddSingleton<ICertificateLoader, CertificateLoader>();
+        services.AddScoped<ICertificateValidationService, CertificateValidationService>();
+        services.AddSingleton<ISecurityEventLogger, SecurityEventLogger>();
+        
+        services.AddAuthentication(CertificateAuthenticationDefaults.AuthenticationScheme)
+            .AddCertificate(options =>
+            {
+                options.Events = new CertificateAuthenticationEvents
+                {
+                    OnCertificateValidated = context =>
+                    {
+                        // Additional validation logic can be added here if needed
+                        return Task.CompletedTask;
+                    }
+                };
+            });
+
+        services.AddAuthorization(options =>
+        {
+            options.AddPolicy("RequireValidCertificate", policy =>
+                policy.RequireAuthenticatedUser());
+
+            options.AddPolicy("RequireSpecificProvider", policy =>
+                policy.RequireClaim("Provider", "PKCS11", "CSP", "KSP", "CTK"));
+
+            options.AddPolicy("RequireAdminCertificate", policy =>
+                policy.RequireClaim("CertificateRole", "Admin"));
+        });
+        
         return services;
     }
 }

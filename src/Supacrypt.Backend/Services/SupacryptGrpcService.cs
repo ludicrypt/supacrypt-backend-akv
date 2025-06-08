@@ -1,6 +1,7 @@
 using FluentValidation;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Authorization;
 using Supacrypt.V1;
 using Supacrypt.Backend.Services.Interfaces;
 using Supacrypt.Backend.ErrorHandling;
@@ -10,6 +11,7 @@ using System.Diagnostics;
 
 namespace Supacrypt.Backend.Services;
 
+[Authorize(Policy = "RequireValidCertificate")]
 public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
 {
     private readonly IKeyManagementService _keyManagementService;
