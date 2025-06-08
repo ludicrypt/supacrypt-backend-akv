@@ -32,7 +32,7 @@ public class MockCryptographicOperations : ICryptographicOperations
             if (keyMetadata == null)
             {
                 throw new CryptographicOperationException(
-                    ErrorCode.ErrorCodeKeyNotFound,
+                    ErrorCode.KeyNotFound,
                     $"Key with ID '{request.KeyId}' not found",
                     "SignData",
                     correlationId,
@@ -42,7 +42,7 @@ public class MockCryptographicOperations : ICryptographicOperations
             if (!keyMetadata.Operations.Contains("sign"))
             {
                 throw new CryptographicOperationException(
-                    ErrorCode.ErrorCodeOperationNotSupported,
+                    ErrorCode.OperationNotSupported,
                     $"Key '{request.KeyId}' does not support signing operations",
                     "SignData",
                     correlationId,
@@ -92,7 +92,7 @@ public class MockCryptographicOperations : ICryptographicOperations
             if (!keyMetadata.Operations.Contains("verify"))
             {
                 throw new CryptographicOperationException(
-                    ErrorCode.ErrorCodeOperationNotSupported,
+                    ErrorCode.OperationNotSupported,
                     $"Key '{request.KeyId}' does not support verification operations",
                     "VerifySignature",
                     correlationId,
@@ -142,7 +142,7 @@ public class MockCryptographicOperations : ICryptographicOperations
             if (!keyMetadata.Operations.Contains("encrypt"))
             {
                 throw new CryptographicOperationException(
-                    ErrorCode.ErrorCodeOperationNotSupported,
+                    ErrorCode.OperationNotSupported,
                     $"Key '{request.KeyId}' does not support encryption operations",
                     "EncryptData",
                     correlationId,
@@ -192,7 +192,7 @@ public class MockCryptographicOperations : ICryptographicOperations
             if (!keyMetadata.Operations.Contains("decrypt"))
             {
                 throw new CryptographicOperationException(
-                    ErrorCode.ErrorCodeOperationNotSupported,
+                    ErrorCode.OperationNotSupported,
                     $"Key '{request.KeyId}' does not support decryption operations",
                     "DecryptData",
                     correlationId,
@@ -230,8 +230,8 @@ public class MockCryptographicOperations : ICryptographicOperations
         var hashBytes = SHA256.HashData(data);
         var signatureSize = algorithm switch
         {
-            KeyAlgorithm.KeyAlgorithmRsa => 256,
-            KeyAlgorithm.KeyAlgorithmEcc or KeyAlgorithm.KeyAlgorithmEcdsa => 64,
+            KeyAlgorithm.Rsa => 256,
+            KeyAlgorithm.Ecc or KeyAlgorithm.Ecdsa => 64,
             _ => 64
         };
 
@@ -264,7 +264,7 @@ public class MockCryptographicOperations : ICryptographicOperations
         if (ciphertext.Length < 16)
         {
             throw new CryptographicOperationException(
-                ErrorCode.ErrorCodeDecryptionFailed,
+                ErrorCode.DecryptionFailed,
                 "Invalid ciphertext format",
                 "DecryptData");
         }

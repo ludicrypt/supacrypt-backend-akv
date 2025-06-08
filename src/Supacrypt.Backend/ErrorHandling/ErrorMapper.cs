@@ -15,8 +15,8 @@ public static class ErrorMapper
             Supacrypt.Backend.Exceptions.ValidationException validationEx => new Status(StatusCode.InvalidArgument, validationEx.Message),
             KeyManagementException keyEx => MapKeyManagementException(keyEx),
             CryptographicOperationException cryptoEx => MapCryptographicException(cryptoEx),
-            ArgumentException => new Status(StatusCode.InvalidArgument, "Invalid request parameters"),
             ArgumentNullException => new Status(StatusCode.InvalidArgument, "Required parameter is missing"),
+            ArgumentException => new Status(StatusCode.InvalidArgument, "Invalid request parameters"),
             TimeoutException => new Status(StatusCode.DeadlineExceeded, "Operation timed out"),
             UnauthorizedAccessException => new Status(StatusCode.Unauthenticated, "Authentication failed"),
             _ => new Status(StatusCode.Internal, "An internal error occurred")
@@ -33,7 +33,7 @@ public static class ErrorMapper
         switch (exception)
         {
             case Supacrypt.Backend.Exceptions.ValidationException validationEx:
-                errorDetails.Code = ErrorCode.ErrorCodeInvalidRequest;
+                errorDetails.Code = ErrorCode.InvalidRequest;
                 errorDetails.Message = validationEx.Message;
                 errorDetails.Details = string.Join(", ", validationEx.Errors.SelectMany(kvp => kvp.Value));
                 break;
@@ -55,7 +55,7 @@ public static class ErrorMapper
                 break;
 
             default:
-                errorDetails.Code = ErrorCode.ErrorCodeInternalError;
+                errorDetails.Code = ErrorCode.InternalError;
                 errorDetails.Message = "An internal error occurred";
                 errorDetails.Details = GetSafeErrorMessage(exception);
                 break;
@@ -68,12 +68,12 @@ public static class ErrorMapper
     {
         return exception.ErrorCode switch
         {
-            ErrorCode.ErrorCodeKeyNotFound => new Status(StatusCode.NotFound, exception.Message),
-            ErrorCode.ErrorCodeKeyAlreadyExists => new Status(StatusCode.AlreadyExists, exception.Message),
-            ErrorCode.ErrorCodeUnsupportedAlgorithm => new Status(StatusCode.InvalidArgument, exception.Message),
-            ErrorCode.ErrorCodeKeySizeNotSupported => new Status(StatusCode.InvalidArgument, exception.Message),
-            ErrorCode.ErrorCodeAuthenticationFailed => new Status(StatusCode.Unauthenticated, exception.Message),
-            ErrorCode.ErrorCodeAuthorizationFailed => new Status(StatusCode.PermissionDenied, exception.Message),
+            ErrorCode.KeyNotFound => new Status(StatusCode.NotFound, exception.Message),
+            ErrorCode.KeyAlreadyExists => new Status(StatusCode.AlreadyExists, exception.Message),
+            ErrorCode.UnsupportedAlgorithm => new Status(StatusCode.InvalidArgument, exception.Message),
+            ErrorCode.KeySizeNotSupported => new Status(StatusCode.InvalidArgument, exception.Message),
+            ErrorCode.AuthenticationFailed => new Status(StatusCode.Unauthenticated, exception.Message),
+            ErrorCode.AuthorizationFailed => new Status(StatusCode.PermissionDenied, exception.Message),
             _ => new Status(StatusCode.Internal, exception.Message)
         };
     }
@@ -82,12 +82,12 @@ public static class ErrorMapper
     {
         return exception.ErrorCode switch
         {
-            ErrorCode.ErrorCodeKeyNotFound => new Status(StatusCode.NotFound, exception.Message),
-            ErrorCode.ErrorCodeInvalidSignature => new Status(StatusCode.InvalidArgument, exception.Message),
-            ErrorCode.ErrorCodeUnsupportedAlgorithm => new Status(StatusCode.InvalidArgument, exception.Message),
-            ErrorCode.ErrorCodeEncryptionFailed => new Status(StatusCode.Internal, exception.Message),
-            ErrorCode.ErrorCodeDecryptionFailed => new Status(StatusCode.Internal, exception.Message),
-            ErrorCode.ErrorCodeOperationNotSupported => new Status(StatusCode.Unimplemented, exception.Message),
+            ErrorCode.KeyNotFound => new Status(StatusCode.NotFound, exception.Message),
+            ErrorCode.InvalidSignature => new Status(StatusCode.InvalidArgument, exception.Message),
+            ErrorCode.UnsupportedAlgorithm => new Status(StatusCode.InvalidArgument, exception.Message),
+            ErrorCode.EncryptionFailed => new Status(StatusCode.Internal, exception.Message),
+            ErrorCode.DecryptionFailed => new Status(StatusCode.Internal, exception.Message),
+            ErrorCode.OperationNotSupported => new Status(StatusCode.Unimplemented, exception.Message),
             _ => new Status(StatusCode.Internal, exception.Message)
         };
     }

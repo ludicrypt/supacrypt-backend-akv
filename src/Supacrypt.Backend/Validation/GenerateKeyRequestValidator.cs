@@ -21,7 +21,7 @@ public class GenerateKeyRequestValidator : AbstractValidator<GenerateKeyRequest>
             .Must((request, parameters) => ValidationExtensions.IsValidKeyParametersForAlgorithm(request.Algorithm, parameters))
             .WithMessage("Key parameters must match the specified algorithm");
 
-        When(x => x.Algorithm == KeyAlgorithm.KeyAlgorithmRsa, () =>
+        When(x => x.Algorithm == KeyAlgorithm.Rsa, () =>
         {
             RuleFor(x => x.Parameters.RsaParams.KeySize)
                 .ValidRsaKeySize();
@@ -31,7 +31,7 @@ public class GenerateKeyRequestValidator : AbstractValidator<GenerateKeyRequest>
                 .WithMessage("RSA public exponent must be 0 (default), 3, or 65537");
         });
 
-        When(x => x.Algorithm == KeyAlgorithm.KeyAlgorithmEcc || x.Algorithm == KeyAlgorithm.KeyAlgorithmEcdsa, () =>
+        When(x => x.Algorithm == KeyAlgorithm.Ecc || x.Algorithm == KeyAlgorithm.Ecdsa, () =>
         {
             RuleFor(x => x.Parameters.EccParams.Curve)
                 .ValidEccCurve();

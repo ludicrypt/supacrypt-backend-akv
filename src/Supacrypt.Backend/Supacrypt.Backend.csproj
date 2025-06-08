@@ -10,6 +10,7 @@
     
     <!-- gRPC packages -->
     <PackageReference Include="Grpc.AspNetCore" />
+    <PackageReference Include="Grpc.AspNetCore.Server.Reflection" />
     <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
     <PackageReference Include="Google.Protobuf" />
     

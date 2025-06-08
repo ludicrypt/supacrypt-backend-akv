@@ -23,7 +23,7 @@ public static class ValidationExtensions
     public static IRuleBuilder<T, KeyAlgorithm> ValidKeyAlgorithm<T>(this IRuleBuilder<T, KeyAlgorithm> ruleBuilder)
     {
         return ruleBuilder
-            .Must(algorithm => algorithm != KeyAlgorithm.KeyAlgorithmUnspecified)
+            .Must(algorithm => algorithm != KeyAlgorithm.Unspecified)
             .WithMessage("Key algorithm must be specified")
             .Must(algorithm => Enum.IsDefined(typeof(KeyAlgorithm), algorithm))
             .WithMessage("Invalid key algorithm");
@@ -32,27 +32,27 @@ public static class ValidationExtensions
     public static IRuleBuilder<T, RSAKeySize> ValidRsaKeySize<T>(this IRuleBuilder<T, RSAKeySize> ruleBuilder)
     {
         return ruleBuilder
-            .Must(size => size != RSAKeySize.RsaKeySizeUnspecified)
+            .Must(size => size != RSAKeySize.Unspecified)
             .WithMessage("RSA key size must be specified")
-            .Must(size => size == RSAKeySize.RsaKeySize2048 || size == RSAKeySize.RsaKeySize3072 || size == RSAKeySize.RsaKeySize4096)
+            .Must(size => size == RSAKeySize._2048 || size == RSAKeySize._3072 || size == RSAKeySize._4096)
             .WithMessage("RSA key size must be 2048, 3072, or 4096 bits");
     }
 
     public static IRuleBuilder<T, ECCCurve> ValidEccCurve<T>(this IRuleBuilder<T, ECCCurve> ruleBuilder)
     {
         return ruleBuilder
-            .Must(curve => curve != ECCCurve.EccCurveUnspecified)
+            .Must(curve => curve != ECCCurve.Unspecified)
             .WithMessage("ECC curve must be specified")
-            .Must(curve => curve == ECCCurve.EccCurveP256 || curve == ECCCurve.EccCurveP384 || curve == ECCCurve.EccCurveP521)
+            .Must(curve => curve == ECCCurve.P256 || curve == ECCCurve.P384 || curve == ECCCurve.P521)
             .WithMessage("ECC curve must be P-256, P-384, or P-521");
     }
 
     public static IRuleBuilder<T, HashAlgorithm> ValidHashAlgorithm<T>(this IRuleBuilder<T, HashAlgorithm> ruleBuilder)
     {
         return ruleBuilder
-            .Must(hash => hash != HashAlgorithm.HashAlgorithmUnspecified)
+            .Must(hash => hash != HashAlgorithm.Unspecified)
             .WithMessage("Hash algorithm must be specified")
-            .Must(hash => hash == HashAlgorithm.HashAlgorithmSha256 || hash == HashAlgorithm.HashAlgorithmSha384 || hash == HashAlgorithm.HashAlgorithmSha512)
+            .Must(hash => hash == HashAlgorithm.Sha256 || hash == HashAlgorithm.Sha384 || hash == HashAlgorithm.Sha512)
             .WithMessage("Hash algorithm must be SHA-256, SHA-384, or SHA-512");
     }
 
@@ -74,8 +74,8 @@ public static class ValidationExtensions
     {
         return algorithm switch
         {
-            KeyAlgorithm.KeyAlgorithmRsa => parameters?.RsaParams != null,
-            KeyAlgorithm.KeyAlgorithmEcc or KeyAlgorithm.KeyAlgorithmEcdsa => parameters?.EccParams != null,
+            KeyAlgorithm.Rsa => parameters?.RsaParams != null,
+            KeyAlgorithm.Ecc or KeyAlgorithm.Ecdsa => parameters?.EccParams != null,
             _ => false
         };
     }

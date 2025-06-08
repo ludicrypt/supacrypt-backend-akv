@@ -101,7 +101,7 @@ public class MockKeyManagementService : IKeyManagementService
             if (metadata == null)
             {
                 throw new KeyManagementException(
-                    ErrorCode.ErrorCodeKeyNotFound,
+                    ErrorCode.KeyNotFound,
                     $"Key with ID '{request.KeyId}' not found",
                     correlationId,
                     request.KeyId);
@@ -223,7 +223,7 @@ public class MockKeyManagementService : IKeyManagementService
             if (!exists)
             {
                 throw new KeyManagementException(
-                    ErrorCode.ErrorCodeKeyNotFound,
+                    ErrorCode.KeyNotFound,
                     $"Key with ID '{request.KeyId}' not found",
                     correlationId,
                     request.KeyId);
@@ -233,7 +233,7 @@ public class MockKeyManagementService : IKeyManagementService
             if (!deleted)
             {
                 throw new KeyManagementException(
-                    ErrorCode.ErrorCodeInternalError,
+                    ErrorCode.InternalError,
                     $"Failed to delete key with ID '{request.KeyId}'",
                     correlationId,
                     request.KeyId);
@@ -266,8 +266,8 @@ public class MockKeyManagementService : IKeyManagementService
     {
         return algorithm switch
         {
-            KeyAlgorithm.KeyAlgorithmRsa => GenerateMockRsaPublicKey(parameters?.RsaParams),
-            KeyAlgorithm.KeyAlgorithmEcc or KeyAlgorithm.KeyAlgorithmEcdsa => GenerateMockEccPublicKey(parameters?.EccParams),
+            KeyAlgorithm.Rsa => GenerateMockRsaPublicKey(parameters?.RsaParams),
+            KeyAlgorithm.Ecc or KeyAlgorithm.Ecdsa => GenerateMockEccPublicKey(parameters?.EccParams),
             _ => throw new ArgumentException($"Unsupported algorithm: {algorithm}")
         };
     }
@@ -276,9 +276,9 @@ public class MockKeyManagementService : IKeyManagementService
     {
         var keySize = rsaParams?.KeySize switch
         {
-            RSAKeySize.RsaKeySize2048 => 2048,
-            RSAKeySize.RsaKeySize3072 => 3072,
-            RSAKeySize.RsaKeySize4096 => 4096,
+            RSAKeySize._2048 => 2048,
+            RSAKeySize._3072 => 3072,
+            RSAKeySize._4096 => 4096,
             _ => 2048
         };
 
@@ -290,9 +290,9 @@ public class MockKeyManagementService : IKeyManagementService
     {
         var curve = eccParams?.Curve switch
         {
-            ECCCurve.EccCurveP256 => ECCurve.NamedCurves.nistP256,
-            ECCCurve.EccCurveP384 => ECCurve.NamedCurves.nistP384,
-            ECCCurve.EccCurveP521 => ECCurve.NamedCurves.nistP521,
+            ECCCurve.P256 => ECCurve.NamedCurves.nistP256,
+            ECCCurve.P384 => ECCurve.NamedCurves.nistP384,
+            ECCCurve.P521 => ECCurve.NamedCurves.nistP521,
             _ => ECCurve.NamedCurves.nistP256
         };
 

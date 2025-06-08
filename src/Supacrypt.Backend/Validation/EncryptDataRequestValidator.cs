@@ -28,7 +28,7 @@ public class EncryptDataRequestValidator : AbstractValidator<EncryptDataRequest>
             When(x => x.Parameters.RsaParams.PaddingScheme == RSAPaddingScheme.RsaPaddingOaep, () =>
             {
                 RuleFor(x => x.Parameters.RsaParams.OaepHash)
-                    .Must(hash => hash == HashAlgorithm.HashAlgorithmSha256 || hash == HashAlgorithm.HashAlgorithmSha384 || hash == HashAlgorithm.HashAlgorithmSha512)
+                    .Must(hash => hash == HashAlgorithm.Sha256 || hash == HashAlgorithm.Sha384 || hash == HashAlgorithm.Sha512)
                     .WithMessage("OAEP hash algorithm must be SHA-256, SHA-384, or SHA-512");
             });
         });
@@ -36,7 +36,7 @@ public class EncryptDataRequestValidator : AbstractValidator<EncryptDataRequest>
         When(x => x.Parameters?.EccParams != null, () =>
         {
             RuleFor(x => x.Parameters.EccParams.KdfHash)
-                .Must(hash => hash == HashAlgorithm.HashAlgorithmSha256 || hash == HashAlgorithm.HashAlgorithmSha384 || hash == HashAlgorithm.HashAlgorithmSha512)
+                .Must(hash => hash == HashAlgorithm.Sha256 || hash == HashAlgorithm.Sha384 || hash == HashAlgorithm.Sha512)
                 .WithMessage("ECC KDF hash algorithm must be SHA-256, SHA-384, or SHA-512");
         });
     }
