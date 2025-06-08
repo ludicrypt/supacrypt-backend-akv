@@ -43,6 +43,9 @@
     <!-- Logging -->
     <PackageReference Include="Serilog.Extensions.Hosting" />
     <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Formatting.Compact" />
+    <PackageReference Include="Serilog.Settings.Configuration" />
+    <PackageReference Include="Serilog.AspNetCore" />
     
     <!-- Other useful packages -->
     <PackageReference Include="System.ComponentModel.Annotations" />
