@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  supacrypt-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.development
+    volumes:
+      - ./src:/src
+      - ${APPDATA}/Microsoft/UserSecrets:/root/.microsoft/usersecrets:ro
+      - ${APPDATA}/ASP.NET/Https:/root/.aspnet/https:ro
+    environment:
+      - DOTNET_USE_POLLING_FILE_WATCHER=true
+      - ASPNETCORE_LOGGING__CONSOLE__DISABLECOLORS=true

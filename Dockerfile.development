@@ -1,0 +1,10 @@
+# Dockerfile.development
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS development
+WORKDIR /src
+
+# Install development tools
+RUN dotnet tool install --global dotnet-ef
+ENV PATH="${PATH}:/root/.dotnet/tools"
+
+# Keep container running for development
+ENTRYPOINT ["dotnet", "watch", "run", "--no-launch-profile"]

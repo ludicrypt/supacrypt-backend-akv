@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: supacrypt-backend
+  namespace: supacrypt
+  labels:
+    app: supacrypt-backend
+spec:
+  type: ClusterIP
+  ports:
+  - port: 443
+    targetPort: 5000
+    protocol: TCP
+    name: grpc
+  selector:
+    app: supacrypt-backend

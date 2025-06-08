@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supacrypt-backend
+  namespace: supacrypt
+  labels:
+    app: supacrypt-backend
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: supacrypt-backend
+  template:
+    metadata:
+      labels:
+        app: supacrypt-backend
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: supacrypt-backend
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: supacrypt-backend
+        image: supacrypt/backend:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 5000
+          name: grpc
+          protocol: TCP
+        env:
+        - name: ASPNETCORE_ENVIRONMENT
+          value: "Production"
+        - name: AzureKeyVault__VaultUri
+          valueFrom:
+            secretKeyRef:
+              name: azure-keyvault-config
+              key: vault-uri
+        - name: AzureKeyVault__UseManagedIdentity
+          value: "true"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: app-config
+          mountPath: /app/appsettings.Production.json
+          subPath: appsettings.Production.json
+          readOnly: true
+        - name: tls-certs
+          mountPath: /app/certs
+          readOnly: true
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: app-config
+        configMap:
+          name: supacrypt-backend-config
+      - name: tls-certs
+        secret:
+          secretName: supacrypt-tls

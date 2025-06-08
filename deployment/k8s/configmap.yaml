@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: supacrypt-backend-config
+  namespace: supacrypt
+  labels:
+    app: supacrypt-backend
+data:
+  appsettings.Production.json: |
+    {
+      "Logging": {
+        "LogLevel": {
+          "Default": "Information",
+          "Microsoft.AspNetCore": "Warning"
+        }
+      },
+      "Security": {
+        "Mtls": {
+          "Enabled": true,
+          "RequireClientCertificate": true
+        }
+      },
+      "Observability": {
+        "Exporters": {
+          "Otlp": {
+            "Endpoint": "http://otel-collector:4317"
+          }
+        }
+      }
+    }

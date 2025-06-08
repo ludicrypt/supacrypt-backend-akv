@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "supacrypt-env"
+    },
+    "containerRegistryName": {
+      "value": "supacryptregistry"
+    },
+    "keyVaultName": {
+      "value": "supacrypt-kv"
+    },
+    "imageTag": {
+      "value": "latest"
+    },
+    "minReplicas": {
+      "value": 2
+    },
+    "maxReplicas": {
+      "value": 10
+    }
+  }
+}
