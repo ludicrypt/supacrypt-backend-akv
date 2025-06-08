@@ -19,6 +19,10 @@
     <PackageReference Include="Azure.Identity" />
     <PackageReference Include="Azure.Extensions.AspNetCore.Configuration.Secrets" />
     
+    <!-- Resilience packages -->
+    <PackageReference Include="Polly" />
+    <PackageReference Include="Polly.Extensions" />
+    
     <!-- Observability packages -->
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />

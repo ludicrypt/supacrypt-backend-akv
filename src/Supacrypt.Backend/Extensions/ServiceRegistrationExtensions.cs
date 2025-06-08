@@ -1,5 +1,7 @@
 using FluentValidation;
+using Supacrypt.Backend.Configuration;
 using Supacrypt.Backend.Services;
+using Supacrypt.Backend.Services.Azure;
 using Supacrypt.Backend.Services.Interfaces;
 using Supacrypt.Backend.Services.Mock;
 using Supacrypt.Backend.Telemetry;
@@ -12,12 +14,20 @@ public static class ServiceRegistrationExtensions
 {
     public static IServiceCollection AddSupacryptServices(this IServiceCollection services)
     {
-        services.AddScoped<IKeyRepository, MockKeyRepository>();
-        services.AddScoped<IKeyManagementService, MockKeyManagementService>();
-        services.AddScoped<ICryptographicOperations, MockCryptographicOperations>();
+        // Azure Key Vault services
+        services.AddSingleton<IAzureKeyVaultClientFactory, AzureKeyVaultClientFactory>();
+        services.AddSingleton<IAzureKeyVaultResiliencePolicy, AzureKeyVaultResiliencePolicy>();
+        services.AddSingleton<IAzureKeyVaultMetrics, AzureKeyVaultMetrics>();
 
+        // Core services with Azure implementations
+        services.AddScoped<IKeyRepository, AzureKeyVaultKeyRepository>();
+        services.AddScoped<IKeyManagementService, AzureKeyVaultKeyManagementService>();
+        services.AddScoped<ICryptographicOperations, AzureKeyVaultCryptographicOperations>();
+
+        // Performance tracking
         services.AddSingleton<PerformanceTracker>();
 
+        // Validators
         services.AddScoped<IValidator<GenerateKeyRequest>, GenerateKeyRequestValidator>();
         services.AddScoped<IValidator<SignDataRequest>, SignDataRequestValidator>();
         services.AddScoped<IValidator<VerifySignatureRequest>, VerifySignatureRequestValidator>();
@@ -26,6 +36,14 @@ public static class ServiceRegistrationExtensions
         services.AddScoped<IValidator<DeleteKeyRequest>, DeleteKeyRequestValidator>();
         services.AddScoped<IValidator<EncryptDataRequest>, EncryptDataRequestValidator>();
         services.AddScoped<IValidator<DecryptDataRequest>, DecryptDataRequestValidator>();
+
+        return services;
+    }
+
+    public static IServiceCollection AddSupacryptAzureKeyVaultConfiguration(this IServiceCollection services, IConfiguration configuration)
+    {
+        services.Configure<AzureKeyVaultOptions>(
+            configuration.GetSection(AzureKeyVaultOptions.SectionName));
 
         return services;
     }

@@ -100,6 +100,12 @@ enum ErrorCode {
   ERROR_CODE_CSP_ERROR = 20;             // Windows CSP specific errors
   ERROR_CODE_KSP_ERROR = 21;             // Windows KSP specific errors
   ERROR_CODE_CTK_ERROR = 22;             // macOS CTK specific errors
+  
+  // Azure Key Vault specific error codes (as per Task 2.3 assignment)
+  ERROR_CODE_RATE_LIMITED = 1001;        // Azure Key Vault rate limiting
+  ERROR_CODE_UNAUTHORIZED = 1002;        // Azure Key Vault unauthorized access
+  ERROR_CODE_TIMEOUT = 1005;             // Operation timeout
+  ERROR_CODE_SERVICE_UNAVAILABLE = 1006; // Azure Key Vault service unavailable
 }
 
 // KeyParameters defines algorithm-specific parameters for key generation

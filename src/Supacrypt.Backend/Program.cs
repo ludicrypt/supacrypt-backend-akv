@@ -18,6 +18,7 @@ try
 
     builder.Services.AddSupacryptGrpc();
     builder.Services.AddSupacryptServices();
+    builder.Services.AddSupacryptAzureKeyVaultConfiguration(builder.Configuration);
 
     if (builder.Environment.IsDevelopment())
     {
