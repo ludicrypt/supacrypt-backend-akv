@@ -1,0 +1,397 @@
+syntax = "proto3";
+
+package supacrypt.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/ludicrypt/supacrypt/proto/v1";
+
+// SupacryptService defines the main gRPC service interface for cryptographic operations
+// This service provides a unified interface for all crypto providers (PKCS#11, CSP, KSP, CTK)
+// to communicate with the Azure Key Vault backend service.
+service SupacryptService {
+  // GenerateKey creates a new cryptographic key pair with specified parameters
+  rpc GenerateKey(GenerateKeyRequest) returns (GenerateKeyResponse);
+  
+  // SignData performs digital signature operations on provided data
+  rpc SignData(SignDataRequest) returns (SignDataResponse);
+  
+  // VerifySignature validates digital signatures against provided data
+  rpc VerifySignature(VerifySignatureRequest) returns (VerifySignatureResponse);
+  
+  // GetKey retrieves key information and public key material
+  rpc GetKey(GetKeyRequest) returns (GetKeyResponse);
+  
+  // ListKeys enumerates available keys with optional filtering
+  rpc ListKeys(ListKeysRequest) returns (ListKeysResponse);
+  
+  // DeleteKey removes a key from the key vault (where supported)
+  rpc DeleteKey(DeleteKeyRequest) returns (DeleteKeyResponse);
+  
+  // EncryptData performs encryption operations on provided data
+  rpc EncryptData(EncryptDataRequest) returns (EncryptDataResponse);
+  
+  // DecryptData performs decryption operations on encrypted data
+  rpc DecryptData(DecryptDataRequest) returns (DecryptDataResponse);
+}
+
+// KeyAlgorithm defines supported cryptographic algorithms
+enum KeyAlgorithm {
+  KEY_ALGORITHM_UNSPECIFIED = 0;
+  KEY_ALGORITHM_RSA = 1;         // RSA algorithm for asymmetric operations
+  KEY_ALGORITHM_ECC = 2;         // Elliptic Curve Cryptography
+  KEY_ALGORITHM_ECDSA = 3;       // ECDSA specifically for signing
+}
+
+// RSAKeySize defines supported RSA key sizes in bits
+enum RSAKeySize {
+  RSA_KEY_SIZE_UNSPECIFIED = 0;
+  RSA_KEY_SIZE_2048 = 2048;      // Standard RSA 2048-bit
+  RSA_KEY_SIZE_3072 = 3072;      // Enhanced security RSA 3072-bit
+  RSA_KEY_SIZE_4096 = 4096;      // High security RSA 4096-bit
+}
+
+// ECCCurve defines supported elliptic curve parameters
+enum ECCCurve {
+  ECC_CURVE_UNSPECIFIED = 0;
+  ECC_CURVE_P256 = 1;            // NIST P-256 (secp256r1)
+  ECC_CURVE_P384 = 2;            // NIST P-384 (secp384r1)
+  ECC_CURVE_P521 = 3;            // NIST P-521 (secp521r1)
+}
+
+// HashAlgorithm defines supported hash functions for signing operations
+enum HashAlgorithm {
+  HASH_ALGORITHM_UNSPECIFIED = 0;
+  HASH_ALGORITHM_SHA256 = 1;     // SHA-256
+  HASH_ALGORITHM_SHA384 = 2;     // SHA-384
+  HASH_ALGORITHM_SHA512 = 3;     // SHA-512
+}
+
+// RSAPaddingScheme defines padding schemes for RSA operations
+enum RSAPaddingScheme {
+  RSA_PADDING_UNSPECIFIED = 0;
+  RSA_PADDING_PKCS1 = 1;         // PKCS#1 v1.5 padding (for signing and encryption)
+  RSA_PADDING_PSS = 2;           // PSS (Probabilistic Signature Scheme) - signing only
+  RSA_PADDING_OAEP = 3;          // OAEP (Optimal Asymmetric Encryption Padding) - encryption only
+}
+
+// ErrorCode defines standardized error codes across all providers
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_SUCCESS = 1;
+  ERROR_CODE_INVALID_REQUEST = 2;
+  ERROR_CODE_KEY_NOT_FOUND = 3;
+  ERROR_CODE_KEY_ALREADY_EXISTS = 4;
+  ERROR_CODE_UNSUPPORTED_ALGORITHM = 5;
+  ERROR_CODE_INVALID_SIGNATURE = 6;
+  ERROR_CODE_OPERATION_NOT_SUPPORTED = 7;
+  ERROR_CODE_AUTHENTICATION_FAILED = 8;
+  ERROR_CODE_AUTHORIZATION_FAILED = 9;
+  ERROR_CODE_NETWORK_ERROR = 10;
+  ERROR_CODE_INTERNAL_ERROR = 11;
+  ERROR_CODE_KEY_SIZE_NOT_SUPPORTED = 12;
+  ERROR_CODE_CURVE_NOT_SUPPORTED = 13;
+  ERROR_CODE_HASH_NOT_SUPPORTED = 14;
+  ERROR_CODE_PADDING_NOT_SUPPORTED = 15;
+  ERROR_CODE_DECRYPTION_FAILED = 16;     // Decryption operation failed
+  ERROR_CODE_ENCRYPTION_FAILED = 17;     // Encryption operation failed
+  ERROR_CODE_AZURE_KV_ERROR = 18;        // Azure Key Vault specific errors
+  ERROR_CODE_PKCS11_ERROR = 19;          // PKCS#11 provider specific errors
+  ERROR_CODE_CSP_ERROR = 20;             // Windows CSP specific errors
+  ERROR_CODE_KSP_ERROR = 21;             // Windows KSP specific errors
+  ERROR_CODE_CTK_ERROR = 22;             // macOS CTK specific errors
+}
+
+// KeyParameters defines algorithm-specific parameters for key generation
+message KeyParameters {
+  oneof algorithm_params {
+    RSAParameters rsa_params = 1;        // RSA specific parameters
+    ECCParameters ecc_params = 2;        // ECC specific parameters
+  }
+}
+
+// RSAParameters contains RSA-specific key generation parameters
+message RSAParameters {
+  RSAKeySize key_size = 1;               // RSA key size in bits
+  uint32 public_exponent = 2;            // Public exponent (typically 65537)
+}
+
+// ECCParameters contains ECC-specific key generation parameters
+message ECCParameters {
+  ECCCurve curve = 1;                    // Elliptic curve identifier
+}
+
+// KeyMetadata contains descriptive information about a cryptographic key
+message KeyMetadata {
+  string key_id = 1;                     // Unique identifier for the key
+  string name = 2;                       // Human-readable key name
+  KeyAlgorithm algorithm = 3;            // Cryptographic algorithm
+  KeyParameters parameters = 4;          // Algorithm-specific parameters
+  google.protobuf.Timestamp created_at = 5;  // Key creation timestamp
+  google.protobuf.Timestamp updated_at = 6;  // Last modification timestamp
+  bool enabled = 7;                      // Whether the key is enabled for operations
+  map<string, string> tags = 8;          // Custom metadata tags
+  repeated string operations = 9;         // Allowed operations (sign, verify, encrypt, decrypt)
+}
+
+// PublicKey contains public key material in standard formats
+message PublicKey {
+  KeyAlgorithm algorithm = 1;            // Key algorithm
+  bytes key_data = 2;                    // DER-encoded public key
+  KeyParameters parameters = 3;          // Algorithm parameters
+}
+
+// SigningParameters defines parameters for signature operations
+message SigningParameters {
+  HashAlgorithm hash_algorithm = 1;      // Hash function to use
+  oneof algorithm_params {
+    RSASigningParameters rsa_params = 2;  // RSA-specific signing parameters
+    ECCSigningParameters ecc_params = 3;  // ECC-specific signing parameters
+  }
+}
+
+// RSASigningParameters contains RSA-specific signing parameters
+message RSASigningParameters {
+  RSAPaddingScheme padding_scheme = 1;   // Padding scheme for RSA
+  uint32 salt_length = 2;                // Salt length for PSS padding (optional)
+}
+
+// ECCSigningParameters contains ECC-specific signing parameters
+message ECCSigningParameters {
+  // Currently no ECC-specific parameters, reserved for future use
+  reserved 1 to 10;
+}
+
+// EncryptionParameters defines parameters for encryption operations
+message EncryptionParameters {
+  oneof algorithm_params {
+    RSAEncryptionParameters rsa_params = 1;  // RSA-specific encryption parameters
+    ECCEncryptionParameters ecc_params = 2;  // ECC-specific encryption parameters (for ECIES)
+  }
+}
+
+// RSAEncryptionParameters contains RSA-specific encryption parameters
+message RSAEncryptionParameters {
+  RSAPaddingScheme padding_scheme = 1;   // Padding scheme for RSA encryption (PKCS1 or OAEP)
+  HashAlgorithm oaep_hash = 2;           // Hash algorithm for OAEP padding (optional)
+  bytes oaep_label = 3;                  // Label for OAEP padding (optional)
+}
+
+// ECCEncryptionParameters contains ECC-specific encryption parameters
+message ECCEncryptionParameters {
+  // Parameters for ECIES (Elliptic Curve Integrated Encryption Scheme)
+  HashAlgorithm kdf_hash = 1;            // Hash algorithm for Key Derivation Function
+  bytes shared_info = 2;                 // Shared information for KDF (optional)
+  // Reserved for future ECC encryption parameters
+  reserved 3 to 10;
+}
+
+// ErrorDetails provides detailed error information
+message ErrorDetails {
+  ErrorCode code = 1;                    // Standardized error code
+  string message = 2;                    // Human-readable error message
+  string details = 3;                    // Additional error details
+  string provider_error = 4;             // Provider-specific error information
+  map<string, string> context = 5;       // Additional error context
+}
+
+// GenerateKeyRequest contains parameters for key generation
+message GenerateKeyRequest {
+  uint32 version = 1;                    // Protocol version for compatibility
+  string name = 2;                       // Human-readable key name
+  KeyAlgorithm algorithm = 3;            // Cryptographic algorithm
+  KeyParameters parameters = 4;          // Algorithm-specific parameters
+  map<string, string> tags = 5;          // Custom metadata tags
+  repeated string operations = 6;         // Allowed operations for the key
+  // Reserved field numbers for future extensions
+  reserved 7 to 20;
+}
+
+// GenerateKeyResponse contains the result of key generation
+message GenerateKeyResponse {
+  oneof result {
+    GenerateKeySuccess success = 1;      // Successful key generation
+    ErrorDetails error = 2;              // Error information
+  }
+}
+
+// GenerateKeySuccess contains successful key generation results
+message GenerateKeySuccess {
+  KeyMetadata metadata = 1;              // Generated key metadata
+  PublicKey public_key = 2;              // Public key material
+}
+
+// SignDataRequest contains parameters for signing operations
+message SignDataRequest {
+  uint32 version = 1;                    // Protocol version
+  string key_id = 2;                     // Key identifier for signing
+  bytes data = 3;                        // Data to sign (raw or pre-hashed)
+  bool is_prehashed = 4;                 // Whether data is already hashed
+  SigningParameters parameters = 5;       // Signing parameters
+  // Reserved field numbers for future extensions
+  reserved 6 to 20;
+}
+
+// SignDataResponse contains the result of signing operations
+message SignDataResponse {
+  oneof result {
+    SignDataSuccess success = 1;         // Successful signing operation
+    ErrorDetails error = 2;              // Error information
+  }
+}
+
+// SignDataSuccess contains successful signing results
+message SignDataSuccess {
+  bytes signature = 1;                   // Digital signature
+  SigningParameters parameters = 2;      // Parameters used for signing
+  string key_id = 3;                     // Key used for signing
+}
+
+// VerifySignatureRequest contains parameters for signature verification
+message VerifySignatureRequest {
+  uint32 version = 1;                    // Protocol version
+  string key_id = 2;                     // Key identifier for verification
+  bytes data = 3;                        // Original data that was signed
+  bytes signature = 4;                   // Signature to verify
+  bool is_prehashed = 5;                 // Whether data is already hashed
+  SigningParameters parameters = 6;       // Verification parameters
+  // Reserved field numbers for future extensions
+  reserved 7 to 20;
+}
+
+// VerifySignatureResponse contains the result of signature verification
+message VerifySignatureResponse {
+  oneof result {
+    VerifySignatureSuccess success = 1;  // Successful verification
+    ErrorDetails error = 2;              // Error information
+  }
+}
+
+// VerifySignatureSuccess contains successful verification results
+message VerifySignatureSuccess {
+  bool is_valid = 1;                     // Whether the signature is valid
+  SigningParameters parameters = 2;      // Parameters used for verification
+  string key_id = 3;                     // Key used for verification
+}
+
+// GetKeyRequest contains parameters for key retrieval
+message GetKeyRequest {
+  uint32 version = 1;                    // Protocol version
+  string key_id = 2;                     // Key identifier to retrieve
+  bool include_public_key = 3;           // Whether to include public key material
+  // Reserved field numbers for future extensions
+  reserved 4 to 20;
+}
+
+// GetKeyResponse contains the result of key retrieval
+message GetKeyResponse {
+  oneof result {
+    GetKeySuccess success = 1;           // Successful key retrieval
+    ErrorDetails error = 2;              // Error information
+  }
+}
+
+// GetKeySuccess contains successful key retrieval results
+message GetKeySuccess {
+  KeyMetadata metadata = 1;              // Key metadata
+  PublicKey public_key = 2;              // Public key material (if requested)
+}
+
+// ListKeysRequest contains parameters for key enumeration
+message ListKeysRequest {
+  uint32 version = 1;                    // Protocol version
+  string filter = 2;                     // Optional filter expression
+  uint32 page_size = 3;                  // Maximum number of keys to return
+  string page_token = 4;                 // Token for pagination
+  bool include_disabled = 5;             // Whether to include disabled keys
+  // Reserved field numbers for future extensions
+  reserved 6 to 20;
+}
+
+// ListKeysResponse contains the result of key enumeration
+message ListKeysResponse {
+  oneof result {
+    ListKeysSuccess success = 1;         // Successful key listing
+    ErrorDetails error = 2;              // Error information
+  }
+}
+
+// ListKeysSuccess contains successful key listing results
+message ListKeysSuccess {
+  repeated KeyMetadata keys = 1;         // List of key metadata
+  string next_page_token = 2;            // Token for next page (if available)
+  uint32 total_count = 3;                // Total number of keys (if known)
+}
+
+// DeleteKeyRequest contains parameters for key deletion
+message DeleteKeyRequest {
+  uint32 version = 1;                    // Protocol version
+  string key_id = 2;                     // Key identifier to delete
+  bool force = 3;                        // Force deletion even if key is in use
+  // Reserved field numbers for future extensions
+  reserved 4 to 20;
+}
+
+// DeleteKeyResponse contains the result of key deletion
+message DeleteKeyResponse {
+  oneof result {
+    DeleteKeySuccess success = 1;        // Successful key deletion
+    ErrorDetails error = 2;              // Error information
+  }
+}
+
+// DeleteKeySuccess contains successful key deletion results
+message DeleteKeySuccess {
+  string key_id = 1;                     // Deleted key identifier
+  google.protobuf.Timestamp deleted_at = 2;  // Deletion timestamp
+}
+
+// EncryptDataRequest contains parameters for encryption operations
+message EncryptDataRequest {
+  uint32 version = 1;                    // Protocol version
+  string key_id = 2;                     // Key identifier for encryption
+  bytes plaintext = 3;                   // Data to encrypt
+  EncryptionParameters parameters = 4;   // Encryption parameters
+  // Reserved field numbers for future extensions
+  reserved 5 to 20;
+}
+
+// EncryptDataResponse contains the result of encryption operations
+message EncryptDataResponse {
+  oneof result {
+    EncryptDataSuccess success = 1;      // Successful encryption operation
+    ErrorDetails error = 2;              // Error information
+  }
+}
+
+// EncryptDataSuccess contains successful encryption results
+message EncryptDataSuccess {
+  bytes ciphertext = 1;                  // Encrypted data
+  EncryptionParameters parameters = 2;   // Parameters used for encryption
+  string key_id = 3;                     // Key used for encryption
+}
+
+// DecryptDataRequest contains parameters for decryption operations
+message DecryptDataRequest {
+  uint32 version = 1;                    // Protocol version
+  string key_id = 2;                     // Key identifier for decryption
+  bytes ciphertext = 3;                  // Data to decrypt
+  EncryptionParameters parameters = 4;   // Decryption parameters (must match encryption)
+  // Reserved field numbers for future extensions
+  reserved 5 to 20;
+}
+
+// DecryptDataResponse contains the result of decryption operations
+message DecryptDataResponse {
+  oneof result {
+    DecryptDataSuccess success = 1;      // Successful decryption operation
+    ErrorDetails error = 2;              // Error information
+  }
+}
+
+// DecryptDataSuccess contains successful decryption results
+message DecryptDataSuccess {
+  bytes plaintext = 1;                   // Decrypted data
+  EncryptionParameters parameters = 2;   // Parameters used for decryption
+  string key_id = 3;                     // Key used for decryption
+}
