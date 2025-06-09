@@ -54,14 +54,14 @@ public class ObservabilityHealthCheck : IHealthCheck
         return new HealthCheckResult(status, description, data: data);
     }
 
-    private async Task CheckMetricsCollectionAsync(List<(string name, bool healthy, string details, object? data)> checks)
+    private Task CheckMetricsCollectionAsync(List<(string name, bool healthy, string details, object? data)> checks)
     {
         try
         {
             if (_options.Metrics?.Enabled != true)
             {
                 checks.Add(("Metrics", false, "Metrics collection is disabled", null));
-                return;
+                return Task.CompletedTask;
             }
 
             // Check if meters are properly registered
@@ -82,6 +82,8 @@ public class ObservabilityHealthCheck : IHealthCheck
         {
             checks.Add(("Metrics", false, $"Metrics collection error: {ex.Message}", null));
         }
+        
+        return Task.CompletedTask;
     }
 
     private void CheckTracingInstrumentation(List<(string name, bool healthy, string details, object? data)> checks)

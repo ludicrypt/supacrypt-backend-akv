@@ -18,7 +18,6 @@ public class AzureKeyVaultResiliencePolicy : IAzureKeyVaultResiliencePolicy
 {
     private readonly AzureKeyVaultOptions _options;
     private readonly ILogger<AzureKeyVaultResiliencePolicy> _logger;
-    private readonly ResiliencePipeline<object> _pipeline;
 
     public AzureKeyVaultResiliencePolicy(
         IOptions<AzureKeyVaultOptions> options,
@@ -26,22 +25,21 @@ public class AzureKeyVaultResiliencePolicy : IAzureKeyVaultResiliencePolicy
     {
         _options = options.Value;
         _logger = logger;
-        _pipeline = CreateResiliencePipeline();
     }
 
     public ResiliencePipeline<T> GetPipeline<T>()
     {
-        return _pipeline.AsGeneric<T>();
+        return CreateResiliencePipeline<T>();
     }
 
-    private ResiliencePipeline<object> CreateResiliencePipeline()
+    private ResiliencePipeline<T> CreateResiliencePipeline<T>()
     {
-        var pipelineBuilder = new ResiliencePipelineBuilder<object>();
+        var pipelineBuilder = new ResiliencePipelineBuilder<T>();
 
         // Add retry strategy
-        pipelineBuilder.AddRetry(new RetryStrategyOptions<object>
+        pipelineBuilder.AddRetry(new RetryStrategyOptions<T>
         {
-            ShouldHandle = new PredicateBuilder<object>()
+            ShouldHandle = new PredicateBuilder<T>()
                 .Handle<RequestFailedException>(IsTransientError)
                 .Handle<TaskCanceledException>()
                 .Handle<HttpRequestException>()
@@ -60,9 +58,9 @@ public class AzureKeyVaultResiliencePolicy : IAzureKeyVaultResiliencePolicy
         });
 
         // Add circuit breaker strategy
-        pipelineBuilder.AddCircuitBreaker(new CircuitBreakerStrategyOptions<object>
+        pipelineBuilder.AddCircuitBreaker(new CircuitBreakerStrategyOptions<T>
         {
-            ShouldHandle = new PredicateBuilder<object>()
+            ShouldHandle = new PredicateBuilder<T>()
                 .Handle<RequestFailedException>(IsCircuitBreakerError)
                 .Handle<TaskCanceledException>()
                 .Handle<HttpRequestException>(),

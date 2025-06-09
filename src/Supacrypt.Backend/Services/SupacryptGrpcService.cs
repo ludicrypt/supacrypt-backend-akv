@@ -61,6 +61,18 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
         _decryptDataValidator = decryptDataValidator;
     }
 
+    private static string GetAlgorithmFromSigningParameters(SigningParameters? parameters)
+    {
+        if (parameters == null) return "Unknown";
+        
+        return parameters.AlgorithmParamsCase switch
+        {
+            SigningParameters.AlgorithmParamsOneofCase.RsaParams => "RSA",
+            SigningParameters.AlgorithmParamsOneofCase.EccParams => "ECC",
+            _ => "Unknown"
+        };
+    }
+
     public override async Task<GenerateKeyResponse> GenerateKey(
         GenerateKeyRequest request,
         ServerCallContext context)
@@ -125,7 +137,7 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
         if (activity != null)
         {
             TracingEnricher.EnrichGrpcOperation(activity, "SignData", context);
-            TracingEnricher.EnrichCryptoOperation(activity, "sign", request.KeyId, request.Algorithm.ToString());
+            TracingEnricher.EnrichCryptoOperation(activity, "sign", request.KeyId, GetAlgorithmFromSigningParameters(request.Parameters));
             TracingEnricher.SetCorrelationContext(activity, correlationId);
         }
 
@@ -166,7 +178,7 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
             // Record metrics
             _cryptoMetrics.RecordSignOperation(
                 request.KeyId, 
-                request.Algorithm.ToString(), 
+                GetAlgorithmFromSigningParameters(request.Parameters), 
                 stopwatch.Elapsed, 
                 success,
                 request.Data.Length,
@@ -191,7 +203,7 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
         catch (RpcException ex)
         {
             stopwatch.Stop();
-            _cryptoMetrics.RecordSignOperation(request.KeyId, request.Algorithm.ToString(), stopwatch.Elapsed, false, request.Data.Length);
+            _cryptoMetrics.RecordSignOperation(request.KeyId, GetAlgorithmFromSigningParameters(request.Parameters), stopwatch.Elapsed, false, request.Data.Length);
             
             if (activity != null)
             {
@@ -203,7 +215,7 @@ public class SupacryptGrpcService : SupacryptService.SupacryptServiceBase
         catch (Exception ex)
         {
             stopwatch.Stop();
-            _cryptoMetrics.RecordSignOperation(request.KeyId, request.Algorithm.ToString(), stopwatch.Elapsed, false, request.Data.Length);
+            _cryptoMetrics.RecordSignOperation(request.KeyId, GetAlgorithmFromSigningParameters(request.Parameters), stopwatch.Elapsed, false, request.Data.Length);
             
             if (activity != null)
             {

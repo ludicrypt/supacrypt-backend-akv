@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using System.Diagnostics;
 
 namespace Supacrypt.Backend.Observability.Metrics;
 
@@ -73,9 +74,9 @@ public class AkvMetrics
     {
         var tags = new TagList
         {
-            ["operation"] = operation,
-            ["vault_name"] = vaultName,
-            ["result"] = success ? "success" : "error"
+            { "operation", operation },
+            { "vault_name", vaultName },
+            { "result", success ? "success" : "error" }
         };
 
         if (statusCode.HasValue)
@@ -106,10 +107,10 @@ public class AkvMetrics
     {
         var tags = new TagList
         {
-            ["operation"] = operation,
-            ["key_name"] = SanitizeKeyName(keyName),
-            ["vault_name"] = vaultName,
-            ["result"] = success ? "success" : "error"
+            { "operation", operation },
+            { "key_name", SanitizeKeyName(keyName) },
+            { "vault_name", vaultName },
+            { "result", success ? "success" : "error" }
         };
 
         if (!string.IsNullOrEmpty(keyType))
@@ -130,11 +131,11 @@ public class AkvMetrics
     {
         var tags = new TagList
         {
-            ["operation"] = operation,
-            ["key_name"] = SanitizeKeyName(keyName),
-            ["vault_name"] = vaultName,
-            ["algorithm"] = algorithm,
-            ["result"] = success ? "success" : "error"
+            { "operation", operation },
+            { "key_name", SanitizeKeyName(keyName) },
+            { "vault_name", vaultName },
+            { "algorithm", algorithm },
+            { "result", success ? "success" : "error" }
         };
 
         if (dataSize.HasValue)
@@ -149,8 +150,8 @@ public class AkvMetrics
     {
         var tags = new TagList
         {
-            ["vault_name"] = vaultName,
-            ["result"] = success ? "success" : "error"
+            { "vault_name", vaultName },
+            { "result", success ? "success" : "error" }
         };
 
         if (!string.IsNullOrEmpty(errorType))
@@ -166,9 +167,9 @@ public class AkvMetrics
     {
         var tags = new TagList
         {
-            ["operation"] = operation,
-            ["vault_name"] = vaultName,
-            ["attempt_number"] = attemptNumber
+            { "operation", operation },
+            { "vault_name", vaultName },
+            { "attempt_number", attemptNumber }
         };
 
         if (!string.IsNullOrEmpty(errorType))
@@ -183,8 +184,8 @@ public class AkvMetrics
     {
         var tags = new TagList
         {
-            ["vault_name"] = vaultName,
-            ["event"] = eventType
+            { "vault_name", vaultName },
+            { "event", eventType }
         };
 
         switch (eventType.ToLowerInvariant())
@@ -202,7 +203,7 @@ public class AkvMetrics
 
     public void SetConnectionPoolSize(string vaultName, int size)
     {
-        var tags = new TagList { ["vault_name"] = vaultName };
+        var tags = new TagList { { "vault_name", vaultName } };
         
         // Reset and set new value (not ideal for gauge, but UpDownCounter limitation)
         _connectionPoolSize.Add(size, tags);
@@ -210,7 +211,7 @@ public class AkvMetrics
 
     public void SetCircuitBreakerState(string vaultName, string state)
     {
-        var tags = new TagList { ["vault_name"] = vaultName };
+        var tags = new TagList { { "vault_name", vaultName } };
         
         int stateValue = state.ToLowerInvariant() switch
         {
@@ -237,7 +238,7 @@ public class AkvMetrics
             unit: "ms",
             description: "Time waited due to rate limiting");
 
-        var tags = new TagList { ["vault_name"] = vaultName };
+        var tags = new TagList { { "vault_name", vaultName } };
 
         rateLimitCounter.Add(1, tags);
         rateLimitWaitTime.Record(waitTime.TotalMilliseconds, tags);
@@ -251,10 +252,10 @@ public class AkvMetrics
 
         var tags = new TagList
         {
-            ["operation"] = operation,
-            ["vault_name"] = vaultName,
-            ["key_name"] = SanitizeKeyName(keyName),
-            ["result"] = hit ? "hit" : "miss"
+            { "operation", operation },
+            { "vault_name", vaultName },
+            { "key_name", SanitizeKeyName(keyName) },
+            { "result", hit ? "hit" : "miss" }
         };
 
         cacheCounter.Add(1, tags);
@@ -274,10 +275,10 @@ public class AkvMetrics
 
         var tags = new TagList
         {
-            ["operation"] = operation,
-            ["vault_name"] = vaultName,
-            ["batch_size"] = batchSize,
-            ["result"] = success ? "success" : "error"
+            { "operation", operation },
+            { "vault_name", vaultName },
+            { "batch_size", batchSize },
+            { "result", success ? "success" : "error" }
         };
 
         if (successCount.HasValue)

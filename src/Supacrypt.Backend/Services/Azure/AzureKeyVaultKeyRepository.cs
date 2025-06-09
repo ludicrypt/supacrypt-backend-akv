@@ -68,8 +68,8 @@ public class AzureKeyVaultKeyRepository : IKeyRepository
             var client = _clientFactory.CreateKeyClient();
             var pipeline = _resiliencePolicy.GetPipeline<AsyncPageable<KeyProperties>>();
 
-            var properties = await pipeline.ExecuteAsync(async (ct) =>
-                client.GetPropertiesOfKeysAsync(cancellationToken: ct), cancellationToken);
+            var properties = await pipeline.ExecuteAsync<AsyncPageable<KeyProperties>>((ct) =>
+                new ValueTask<AsyncPageable<KeyProperties>>(client.GetPropertiesOfKeysAsync(cancellationToken: ct)), cancellationToken);
 
             var keys = new List<KeyMetadataModel>();
             var skipCount = GetSkipCountFromPageToken(pageToken);
@@ -106,7 +106,8 @@ public class AzureKeyVaultKeyRepository : IKeyRepository
 
                 try
                 {
-                    var keyResponse = await pipeline.ExecuteAsync(async (ct) =>
+                    var keyPipeline = _resiliencePolicy.GetPipeline<Response<KeyVaultKey>>();
+                    var keyResponse = await keyPipeline.ExecuteAsync(async (ct) =>
                         await client.GetKeyAsync(keyProperty.Name, cancellationToken: ct), cancellationToken);
 
                     if (keyResponse?.Value != null)
@@ -161,9 +162,14 @@ public class AzureKeyVaultKeyRepository : IKeyRepository
                 // Update key properties with new tags
                 var keyProperties = new KeyProperties(metadata.KeyId)
                 {
-                    Enabled = metadata.Enabled,
-                    Tags = tags
+                    Enabled = metadata.Enabled
                 };
+                
+                // Add tags to the properties
+                foreach (var tag in tags)
+                {
+                    keyProperties.Tags[tag.Key] = tag.Value;
+                }
 
                 await pipeline.ExecuteAsync(async (ct) =>
                     await client.UpdateKeyPropertiesAsync(keyProperties, cancellationToken: ct), cancellationToken);
@@ -264,14 +270,18 @@ public class AzureKeyVaultKeyRepository : IKeyRepository
         };
 
         // Map Azure Key Vault key type to our algorithm enum
-        metadata.Algorithm = key.KeyType switch
+        if (key.KeyType == KeyType.Rsa || key.KeyType == KeyType.RsaHsm)
         {
-            KeyType.Rsa => KeyAlgorithm.Rsa,
-            KeyType.RsaHsm => KeyAlgorithm.Rsa,
-            KeyType.Ec => KeyAlgorithm.Ec,
-            KeyType.EcHsm => KeyAlgorithm.Ec,
-            _ => KeyAlgorithm.Rsa
-        };
+            metadata.Algorithm = KeyAlgorithm.Rsa;
+        }
+        else if (key.KeyType == KeyType.Ec || key.KeyType == KeyType.EcHsm)
+        {
+            metadata.Algorithm = KeyAlgorithm.Ecc;
+        }
+        else
+        {
+            metadata.Algorithm = KeyAlgorithm.Rsa;
+        }
 
         // Extract metadata from tags
         if (metadata.Tags.TryGetValue("supacrypt_algorithm", out var algorithmTag) &&
@@ -309,45 +319,66 @@ public class AzureKeyVaultKeyRepository : IKeyRepository
 
     private static List<string> GetDefaultOperationsForKeyType(KeyType keyType)
     {
-        return keyType switch
+        if (keyType == KeyType.Rsa || keyType == KeyType.RsaHsm)
         {
-            KeyType.Rsa or KeyType.RsaHsm => new List<string> { "sign", "verify", "encrypt", "decrypt" },
-            KeyType.Ec or KeyType.EcHsm => new List<string> { "sign", "verify" },
-            _ => new List<string> { "sign", "verify" }
-        };
+            return new List<string> { "sign", "verify", "encrypt", "decrypt" };
+        }
+        else if (keyType == KeyType.Ec || keyType == KeyType.EcHsm)
+        {
+            return new List<string> { "sign", "verify" };
+        }
+        else
+        {
+            return new List<string> { "sign", "verify" };
+        }
     }
 
     private static KeyParameters CreateKeyParameters(KeyVaultKey key)
     {
-        return key.KeyType switch
+        if (key.KeyType == KeyType.Rsa || key.KeyType == KeyType.RsaHsm)
         {
-            KeyType.Rsa or KeyType.RsaHsm => new KeyParameters
+            return new KeyParameters
             {
-                RsaParams = new RsaParameters
+                RsaParams = new RSAParameters
                 {
-                    KeySize = (RsaKeySize)(key.Key.ToRSA()?.KeySize ?? 2048)
+                    KeySize = (RSAKeySize)(key.Key.ToRSA()?.KeySize ?? 2048)
                 }
-            },
-            KeyType.Ec or KeyType.EcHsm => new KeyParameters
+            };
+        }
+        else if (key.KeyType == KeyType.Ec || key.KeyType == KeyType.EcHsm)
+        {
+            return new KeyParameters
             {
-                EccParams = new EccParameters
+                EccParams = new ECCParameters
                 {
                     Curve = MapEcCurve(key.Key.CurveName)
                 }
-            },
-            _ => new KeyParameters()
-        };
+            };
+        }
+        else
+        {
+            return new KeyParameters();
+        }
     }
 
     private static ECCCurve MapEcCurve(KeyCurveName? curveName)
     {
-        return curveName switch
+        if (curveName == KeyCurveName.P256)
         {
-            KeyCurveName.P256 => ECCCurve.P256,
-            KeyCurveName.P384 => ECCCurve.P384,
-            KeyCurveName.P521 => ECCCurve.P521,
-            _ => ECCCurve.P256
-        };
+            return ECCCurve.P256;
+        }
+        else if (curveName == KeyCurveName.P384)
+        {
+            return ECCCurve.P384;
+        }
+        else if (curveName == KeyCurveName.P521)
+        {
+            return ECCCurve.P521;
+        }
+        else
+        {
+            return ECCCurve.P256;
+        }
     }
 
     private static int GetSkipCountFromPageToken(string? pageToken)

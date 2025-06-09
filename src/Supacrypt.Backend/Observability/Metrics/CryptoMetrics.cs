@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using System.Diagnostics;
 
 namespace Supacrypt.Backend.Observability.Metrics;
 
@@ -58,9 +59,9 @@ public class CryptoMetrics
     {
         var tags = new TagList
         {
-            ["operation"] = operationType,
-            ["algorithm"] = algorithm,
-            ["result"] = success ? "success" : "error"
+            { "operation", operationType },
+            { "algorithm", algorithm },
+            { "result", success ? "success" : "error" }
         };
 
         // Record operation count
@@ -86,8 +87,8 @@ public class CryptoMetrics
         {
             var keyTags = new TagList
             {
-                ["key_id"] = SanitizeKeyId(keyId),
-                ["operation"] = operationType
+                { "key_id", SanitizeKeyId(keyId) },
+                { "operation", operationType }
             };
             _keyUsageCount.Add(1, keyTags);
         }
@@ -102,10 +103,11 @@ public class CryptoMetrics
         {
             var tags = new TagList
             {
-                ["operation"] = "sign",
-                ["algorithm"] = algorithm
+                { "operation", "sign" },
+                { "algorithm", algorithm },
+                { "data_type", "signature" }
             };
-            _dataSize.Record(signatureSize.Value, tags.Add("data_type", "signature"));
+            _dataSize.Record(signatureSize.Value, tags);
         }
     }
 
@@ -114,16 +116,28 @@ public class CryptoMetrics
     {
         var tags = new TagList
         {
-            ["operation"] = "verify",
-            ["algorithm"] = algorithm,
-            ["result"] = success ? "success" : "error",
-            ["signature_valid"] = isValid
+            { "operation", "verify" },
+            { "algorithm", algorithm },
+            { "result", success ? "success" : "error" },
+            { "signature_valid", isValid }
         };
 
         _operationCount.Add(1, tags);
         _operationDuration.Record(duration.TotalMilliseconds, tags);
-        _dataSize.Record(dataSize, tags.Add("data_type", "payload"));
-        _dataSize.Record(signatureSize, tags.Add("data_type", "signature"));
+        
+        var payloadTags = new TagList { { "data_type", "payload" } };
+        foreach (var tag in tags)
+        {
+            payloadTags.Add(tag);
+        }
+        _dataSize.Record(dataSize, payloadTags);
+        
+        var signatureTags = new TagList { { "data_type", "signature" } };
+        foreach (var tag in tags)
+        {
+            signatureTags.Add(tag);
+        }
+        _dataSize.Record(signatureSize, signatureTags);
 
         if (!success)
         {
@@ -133,8 +147,8 @@ public class CryptoMetrics
         // Record key usage
         var keyTags = new TagList
         {
-            ["key_id"] = SanitizeKeyId(keyId),
-            ["operation"] = "verify"
+            { "key_id", SanitizeKeyId(keyId) },
+            { "operation", "verify" }
         };
         _keyUsageCount.Add(1, keyTags);
     }
@@ -148,10 +162,11 @@ public class CryptoMetrics
         {
             var tags = new TagList
             {
-                ["operation"] = "encrypt",
-                ["algorithm"] = algorithm
+                { "operation", "encrypt" },
+                { "algorithm", algorithm },
+                { "data_type", "ciphertext" }
             };
-            _dataSize.Record(ciphertextSize.Value, tags.Add("data_type", "ciphertext"));
+            _dataSize.Record(ciphertextSize.Value, tags);
         }
     }
 
@@ -164,10 +179,11 @@ public class CryptoMetrics
         {
             var tags = new TagList
             {
-                ["operation"] = "decrypt",
-                ["algorithm"] = algorithm
+                { "operation", "decrypt" },
+                { "algorithm", algorithm },
+                { "data_type", "plaintext" }
             };
-            _dataSize.Record(plaintextSize.Value, tags.Add("data_type", "plaintext"));
+            _dataSize.Record(plaintextSize.Value, tags);
         }
     }
 
@@ -175,11 +191,11 @@ public class CryptoMetrics
     {
         var tags = new TagList
         {
-            ["operation"] = "generate_key",
-            ["key_type"] = keyType,
-            ["key_size"] = keySize,
-            ["algorithm"] = algorithm,
-            ["result"] = success ? "success" : "error"
+            { "operation", "generate_key" },
+            { "key_type", keyType },
+            { "key_size", keySize },
+            { "algorithm", algorithm },
+            { "result", success ? "success" : "error" }
         };
 
         _operationCount.Add(1, tags);
@@ -193,13 +209,13 @@ public class CryptoMetrics
 
     public void RecordActiveOperationStart(string operationType)
     {
-        var tags = new TagList { ["operation"] = operationType };
+        var tags = new TagList { { "operation", operationType } };
         _activeOperations.Add(1, tags);
     }
 
     public void RecordActiveOperationEnd(string operationType)
     {
-        var tags = new TagList { ["operation"] = operationType };
+        var tags = new TagList { { "operation", operationType } };
         _activeOperations.Add(-1, tags);
     }
 
@@ -211,8 +227,8 @@ public class CryptoMetrics
 
         var tags = new TagList
         {
-            ["algorithm"] = algorithm,
-            ["operation"] = operationType
+            { "algorithm", algorithm },
+            { "operation", operationType }
         };
 
         algorithmCounter.Add(1, tags);

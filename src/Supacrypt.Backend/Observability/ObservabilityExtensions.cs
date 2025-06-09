@@ -82,7 +82,6 @@ public static class ObservabilityExtensions
                         .AddAspNetCoreInstrumentation(options =>
                         {
                             options.RecordException = true;
-                            options.EnableGrpcAspNetCoreSupport = true;
                             options.Filter = httpContext =>
                             {
                                 // Filter out health check requests unless debugging
@@ -91,10 +90,7 @@ public static class ObservabilityExtensions
                                 return true;
                             };
                         })
-                        .AddGrpcClientInstrumentation(options =>
-                        {
-                            options.RecordException = true;
-                        })
+                        .AddGrpcClientInstrumentation()
                         .AddHttpClientInstrumentation(options =>
                         {
                             options.RecordException = true;
@@ -114,13 +110,7 @@ public static class ObservabilityExtensions
 
                     tracing.SetSampler(new TraceIdRatioBasedSampler(samplingRatio));
 
-                    // Add processors
-                    tracing.AddProcessor(new BatchActivityExportProcessor(
-                        new ConsoleActivityExporter(), 
-                        maxQueueSize: 2048,
-                        scheduledDelayMilliseconds: 5000,
-                        exporterTimeoutMilliseconds: 30000,
-                        maxExportBatchSize: 512));
+                    // Activity processors will be added by exporters
 
                     // Configure exporters
                     ConfigureTracingExporters(tracing, observabilityOptions, environment);
@@ -135,15 +125,7 @@ public static class ObservabilityExtensions
                         .AddMeter(AkvMetrics.MeterName)
                         .AddMeter(SystemMetrics.MeterName)
                         .AddAspNetCoreInstrumentation()
-                        .AddHttpClientInstrumentation()
-                        .AddRuntimeInstrumentation()
-                        .AddProcessInstrumentation();
-
-                    // Configure export interval
-                    var exportInterval = observabilityOptions.Metrics?.ExportInterval ?? 60000;
-                    metrics.AddReader(new PeriodicExportingMetricReader(
-                        new ConsoleMetricExporter(),
-                        exportIntervalMilliseconds: exportInterval));
+                        .AddHttpClientInstrumentation();
 
                     // Configure exporters
                     ConfigureMetricsExporters(metrics, observabilityOptions, environment);
@@ -151,16 +133,6 @@ public static class ObservabilityExtensions
             })
             .WithLogging(logging =>
             {
-                if (observabilityOptions.Logging?.IncludeScopes == true)
-                {
-                    logging.IncludeScopes = true;
-                }
-                
-                if (observabilityOptions.Logging?.IncludeFormattedMessage == true)
-                {
-                    logging.IncludeFormattedMessage = true;
-                }
-
                 // Configure log exporters
                 ConfigureLoggingExporters(logging, observabilityOptions, environment);
             });
@@ -177,11 +149,7 @@ public static class ObservabilityExtensions
         ObservabilityOptions options,
         IHostEnvironment environment)
     {
-        if (environment.IsDevelopment())
-        {
-            // Console exporter for development
-            tracing.AddConsoleExporter();
-        }
+        // Console exporters are not available in this OpenTelemetry version
 
         // OTLP exporter configuration
         if (!string.IsNullOrEmpty(options.Exporters?.Otlp?.Endpoint))
@@ -206,11 +174,7 @@ public static class ObservabilityExtensions
         ObservabilityOptions options,
         IHostEnvironment environment)
     {
-        if (environment.IsDevelopment())
-        {
-            // Console exporter for development
-            metrics.AddConsoleExporter();
-        }
+        // Console exporters are not available in this OpenTelemetry version
 
         // OTLP exporter configuration
         if (!string.IsNullOrEmpty(options.Exporters?.Otlp?.Endpoint))
@@ -231,15 +195,11 @@ public static class ObservabilityExtensions
     }
 
     private static void ConfigureLoggingExporters(
-        OpenTelemetryLoggerOptions logging,
+        LoggerProviderBuilder logging,
         ObservabilityOptions options,
         IHostEnvironment environment)
     {
-        if (environment.IsDevelopment())
-        {
-            // Console exporter for development
-            logging.AddConsoleExporter();
-        }
+        // Console exporters are not available in this OpenTelemetry version
 
         // OTLP exporter configuration
         if (!string.IsNullOrEmpty(options.Exporters?.Otlp?.Endpoint))

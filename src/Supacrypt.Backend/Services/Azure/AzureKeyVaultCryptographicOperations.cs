@@ -5,29 +5,46 @@ using Google.Protobuf;
 using Supacrypt.Backend.Services.Interfaces;
 using Supacrypt.V1;
 using System.Diagnostics;
+using AzureSignatureAlgorithm = Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm;
+using AzureEncryptionAlgorithm = Azure.Security.KeyVault.Keys.Cryptography.EncryptionAlgorithm;
 
 namespace Supacrypt.Backend.Services.Azure;
 
-public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
+public class AzureKeyVaultCryptographicOperations(
+    IAzureKeyVaultClientFactory clientFactory,
+    IAzureKeyVaultResiliencePolicy resiliencePolicy,
+    IKeyRepository keyRepository,
+    IAzureKeyVaultMetrics metrics,
+    ILogger<AzureKeyVaultCryptographicOperations> logger) : ICryptographicOperations
 {
-    private readonly IAzureKeyVaultClientFactory _clientFactory;
-    private readonly IAzureKeyVaultResiliencePolicy _resiliencePolicy;
-    private readonly IKeyRepository _keyRepository;
-    private readonly IAzureKeyVaultMetrics _metrics;
-    private readonly ILogger<AzureKeyVaultCryptographicOperations> _logger;
+    private readonly IAzureKeyVaultClientFactory _clientFactory = clientFactory;
+    private readonly IAzureKeyVaultResiliencePolicy _resiliencePolicy = resiliencePolicy;
+    private readonly IKeyRepository _keyRepository = keyRepository;
+    private readonly IAzureKeyVaultMetrics _metrics = metrics;
+    private readonly ILogger<AzureKeyVaultCryptographicOperations> _logger = logger;
 
-    public AzureKeyVaultCryptographicOperations(
-        IAzureKeyVaultClientFactory clientFactory,
-        IAzureKeyVaultResiliencePolicy resiliencePolicy,
-        IKeyRepository keyRepository,
-        IAzureKeyVaultMetrics metrics,
-        ILogger<AzureKeyVaultCryptographicOperations> logger)
+    private static string GetAlgorithmFromSigningParameters(SigningParameters? parameters)
     {
-        _clientFactory = clientFactory;
-        _resiliencePolicy = resiliencePolicy;
-        _keyRepository = keyRepository;
-        _metrics = metrics;
-        _logger = logger;
+        if (parameters == null) return "Unknown";
+        
+        return parameters.AlgorithmParamsCase switch
+        {
+            SigningParameters.AlgorithmParamsOneofCase.RsaParams => "RSA",
+            SigningParameters.AlgorithmParamsOneofCase.EccParams => "ECC",
+            _ => "Unknown"
+        };
+    }
+
+    private static string GetAlgorithmFromEncryptionParameters(EncryptionParameters? parameters)
+    {
+        if (parameters == null) return "Unknown";
+        
+        return parameters.AlgorithmParamsCase switch
+        {
+            EncryptionParameters.AlgorithmParamsOneofCase.RsaParams => "RSA",
+            EncryptionParameters.AlgorithmParamsOneofCase.EccParams => "ECC",
+            _ => "Unknown"
+        };
     }
 
     public async Task<SignDataResponse> SignDataAsync(
@@ -40,7 +57,7 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
         try
         {
             _logger.LogInformation("Starting signing operation for key {KeyId} with algorithm {Algorithm} [CorrelationId: {CorrelationId}]",
-                request.KeyId, request.Algorithm, correlationId);
+                request.KeyId, GetAlgorithmFromSigningParameters(request.Parameters), correlationId);
 
             // Validate key exists and supports signing
             await ValidateKeyForOperation(request.KeyId, "sign", cancellationToken);
@@ -49,26 +66,34 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
             var pipeline = _resiliencePolicy.GetPipeline<Response<KeyVaultKey>>();
 
             // Get the key
-            var keyResponse = await pipeline.ExecuteAsync(async (ct) =>
-                await keyClient.GetKeyAsync(request.KeyId, cancellationToken: ct), cancellationToken);
+            var keyResponse = await pipeline.ExecuteAsync(async (context) =>
+                await keyClient.GetKeyAsync(request.KeyId, cancellationToken: cancellationToken), cancellationToken);
 
-            if (keyResponse?.Value == null)
+            if (keyResponse?.Value is null)
             {
                 throw new KeyNotFoundException($"Key {request.KeyId} not found");
             }
 
             // Create cryptography client for the key
             var cryptoClient = keyClient.GetCryptographyClient(request.KeyId);
-            var cryptoPipeline = _resiliencePolicy.GetPipeline<Response<SignResult>>();
 
             // Map the signature algorithm
-            var signatureAlgorithm = MapSignatureAlgorithm(request.Algorithm, keyResponse.Value.KeyType);
+            var signatureAlgorithm = MapSignatureAlgorithm(request.Parameters, keyResponse.Value.KeyType);
 
-            // Perform the signing operation
-            var signResult = await cryptoPipeline.ExecuteAsync(async (ct) =>
-                await cryptoClient.SignAsync(signatureAlgorithm, request.Data.ToByteArray(), ct), cancellationToken);
+            // Perform the signing operation with basic retry logic
+            SignResult signResult;
+            try
+            {
+                signResult = await cryptoClient.SignAsync(signatureAlgorithm, request.Data.ToByteArray(), cancellationToken);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 429 || ex.Status >= 500)
+            {
+                // Simple retry for transient errors
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                signResult = await cryptoClient.SignAsync(signatureAlgorithm, request.Data.ToByteArray(), cancellationToken);
+            }
 
-            if (signResult?.Value == null)
+            if (signResult is null)
             {
                 throw new InvalidOperationException("Signing operation failed");
             }
@@ -80,9 +105,12 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
 
             return new SignDataResponse
             {
-                KeyId = request.KeyId,
-                Algorithm = request.Algorithm,
-                Signature = ByteString.CopyFrom(signResult.Value.Signature)
+                Success = new SignDataSuccess
+                {
+                    Signature = ByteString.CopyFrom(signResult.Signature),
+                    Parameters = request.Parameters,
+                    KeyId = request.KeyId
+                }
             };
         }
         catch (Exception ex)
@@ -105,7 +133,7 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
         try
         {
             _logger.LogInformation("Starting signature verification for key {KeyId} with algorithm {Algorithm}",
-                request.KeyId, request.Algorithm);
+                request.KeyId, GetAlgorithmFromSigningParameters(request.Parameters));
 
             // Validate key exists and supports verification
             await ValidateKeyForOperation(request.KeyId, "verify", cancellationToken);
@@ -114,35 +142,46 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
             var pipeline = _resiliencePolicy.GetPipeline<Response<KeyVaultKey>>();
 
             // Get the key
-            var keyResponse = await pipeline.ExecuteAsync(async (ct) =>
-                await keyClient.GetKeyAsync(request.KeyId, cancellationToken: ct), cancellationToken);
+            var keyResponse = await pipeline.ExecuteAsync(async (context) =>
+                await keyClient.GetKeyAsync(request.KeyId, cancellationToken: cancellationToken), cancellationToken);
 
-            if (keyResponse?.Value == null)
+            if (keyResponse?.Value is null)
             {
                 throw new KeyNotFoundException($"Key {request.KeyId} not found");
             }
 
             // Create cryptography client for the key
             var cryptoClient = keyClient.GetCryptographyClient(request.KeyId);
-            var cryptoPipeline = _resiliencePolicy.GetPipeline<Response<VerifyResult>>();
 
             // Map the signature algorithm
-            var signatureAlgorithm = MapSignatureAlgorithm(request.Algorithm, keyResponse.Value.KeyType);
+            var signatureAlgorithm = MapSignatureAlgorithm(request.Parameters, keyResponse.Value.KeyType);
 
-            // Perform the verification operation
-            var verifyResult = await cryptoPipeline.ExecuteAsync(async (ct) =>
-                await cryptoClient.VerifyAsync(signatureAlgorithm, request.Data.ToByteArray(), request.Signature.ToByteArray(), ct), cancellationToken);
+            // Perform the verification operation with basic retry logic
+            VerifyResult verifyResult;
+            try
+            {
+                verifyResult = await cryptoClient.VerifyAsync(signatureAlgorithm, request.Data.ToByteArray(), request.Signature.ToByteArray(), cancellationToken);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 429 || ex.Status >= 500)
+            {
+                // Simple retry for transient errors
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                verifyResult = await cryptoClient.VerifyAsync(signatureAlgorithm, request.Data.ToByteArray(), request.Signature.ToByteArray(), cancellationToken);
+            }
 
-            var isValid = verifyResult?.Value?.IsValid ?? false;
+            var isValid = verifyResult?.IsValid ?? false;
 
             _logger.LogInformation("Signature verification for key {KeyId} completed with result {IsValid} in {Duration}ms",
                 request.KeyId, isValid, stopwatch.ElapsedMilliseconds);
 
             return new VerifySignatureResponse
             {
-                KeyId = request.KeyId,
-                Algorithm = request.Algorithm,
-                IsValid = isValid
+                Success = new VerifySignatureSuccess
+                {
+                    IsValid = isValid,
+                    Parameters = request.Parameters,
+                    KeyId = request.KeyId
+                }
             };
         }
         catch (Exception ex)
@@ -163,7 +202,7 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
         try
         {
             _logger.LogInformation("Starting encryption operation for key {KeyId} with algorithm {Algorithm}",
-                request.KeyId, request.Algorithm);
+                request.KeyId, GetAlgorithmFromEncryptionParameters(request.Parameters));
 
             // Validate key exists and supports encryption
             await ValidateKeyForOperation(request.KeyId, "encrypt", cancellationToken);
@@ -172,10 +211,10 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
             var pipeline = _resiliencePolicy.GetPipeline<Response<KeyVaultKey>>();
 
             // Get the key
-            var keyResponse = await pipeline.ExecuteAsync(async (ct) =>
-                await keyClient.GetKeyAsync(request.KeyId, cancellationToken: ct), cancellationToken);
+            var keyResponse = await pipeline.ExecuteAsync(async (context) =>
+                await keyClient.GetKeyAsync(request.KeyId, cancellationToken: cancellationToken), cancellationToken);
 
-            if (keyResponse?.Value == null)
+            if (keyResponse?.Value is null)
             {
                 throw new KeyNotFoundException($"Key {request.KeyId} not found");
             }
@@ -188,16 +227,24 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
 
             // Create cryptography client for the key
             var cryptoClient = keyClient.GetCryptographyClient(request.KeyId);
-            var cryptoPipeline = _resiliencePolicy.GetPipeline<Response<EncryptResult>>();
 
             // Map the encryption algorithm
-            var encryptionAlgorithm = MapEncryptionAlgorithm(request.Algorithm);
+            var encryptionAlgorithm = MapEncryptionAlgorithm(request.Parameters);
 
-            // Perform the encryption operation
-            var encryptResult = await cryptoPipeline.ExecuteAsync(async (ct) =>
-                await cryptoClient.EncryptAsync(encryptionAlgorithm, request.Data.ToByteArray(), ct), cancellationToken);
+            // Perform the encryption operation with basic retry logic
+            EncryptResult encryptResult;
+            try
+            {
+                encryptResult = await cryptoClient.EncryptAsync(encryptionAlgorithm, request.Plaintext.ToByteArray(), cancellationToken);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 429 || ex.Status >= 500)
+            {
+                // Simple retry for transient errors
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                encryptResult = await cryptoClient.EncryptAsync(encryptionAlgorithm, request.Plaintext.ToByteArray(), cancellationToken);
+            }
 
-            if (encryptResult?.Value == null)
+            if (encryptResult is null)
             {
                 throw new InvalidOperationException("Encryption operation failed");
             }
@@ -207,9 +254,12 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
 
             return new EncryptDataResponse
             {
-                KeyId = request.KeyId,
-                Algorithm = request.Algorithm,
-                EncryptedData = ByteString.CopyFrom(encryptResult.Value.Ciphertext)
+                Success = new EncryptDataSuccess
+                {
+                    Ciphertext = ByteString.CopyFrom(encryptResult.Ciphertext),
+                    Parameters = request.Parameters,
+                    KeyId = request.KeyId
+                }
             };
         }
         catch (Exception ex)
@@ -230,7 +280,7 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
         try
         {
             _logger.LogInformation("Starting decryption operation for key {KeyId} with algorithm {Algorithm}",
-                request.KeyId, request.Algorithm);
+                request.KeyId, GetAlgorithmFromEncryptionParameters(request.Parameters));
 
             // Validate key exists and supports decryption
             await ValidateKeyForOperation(request.KeyId, "decrypt", cancellationToken);
@@ -239,10 +289,10 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
             var pipeline = _resiliencePolicy.GetPipeline<Response<KeyVaultKey>>();
 
             // Get the key
-            var keyResponse = await pipeline.ExecuteAsync(async (ct) =>
-                await keyClient.GetKeyAsync(request.KeyId, cancellationToken: ct), cancellationToken);
+            var keyResponse = await pipeline.ExecuteAsync(async (context) =>
+                await keyClient.GetKeyAsync(request.KeyId, cancellationToken: cancellationToken), cancellationToken);
 
-            if (keyResponse?.Value == null)
+            if (keyResponse?.Value is null)
             {
                 throw new KeyNotFoundException($"Key {request.KeyId} not found");
             }
@@ -255,16 +305,24 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
 
             // Create cryptography client for the key
             var cryptoClient = keyClient.GetCryptographyClient(request.KeyId);
-            var cryptoPipeline = _resiliencePolicy.GetPipeline<Response<DecryptResult>>();
 
             // Map the encryption algorithm
-            var encryptionAlgorithm = MapEncryptionAlgorithm(request.Algorithm);
+            var encryptionAlgorithm = MapEncryptionAlgorithm(request.Parameters);
 
-            // Perform the decryption operation
-            var decryptResult = await cryptoPipeline.ExecuteAsync(async (ct) =>
-                await cryptoClient.DecryptAsync(encryptionAlgorithm, request.EncryptedData.ToByteArray(), ct), cancellationToken);
+            // Perform the decryption operation with basic retry logic
+            DecryptResult decryptResult;
+            try
+            {
+                decryptResult = await cryptoClient.DecryptAsync(encryptionAlgorithm, request.Ciphertext.ToByteArray(), cancellationToken);
+            }
+            catch (RequestFailedException ex) when (ex.Status == 429 || ex.Status >= 500)
+            {
+                // Simple retry for transient errors
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+                decryptResult = await cryptoClient.DecryptAsync(encryptionAlgorithm, request.Ciphertext.ToByteArray(), cancellationToken);
+            }
 
-            if (decryptResult?.Value == null)
+            if (decryptResult is null)
             {
                 throw new InvalidOperationException("Decryption operation failed");
             }
@@ -274,9 +332,12 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
 
             return new DecryptDataResponse
             {
-                KeyId = request.KeyId,
-                Algorithm = request.Algorithm,
-                DecryptedData = ByteString.CopyFrom(decryptResult.Value.Plaintext)
+                Success = new DecryptDataSuccess
+                {
+                    Plaintext = ByteString.CopyFrom(decryptResult.Plaintext),
+                    Parameters = request.Parameters,
+                    KeyId = request.KeyId
+                }
             };
         }
         catch (Exception ex)
@@ -291,7 +352,7 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
     {
         var metadata = await _keyRepository.GetKeyMetadataAsync(keyId, cancellationToken);
         
-        if (metadata == null)
+        if (metadata is null)
         {
             throw new KeyNotFoundException($"Key {keyId} not found");
         }
@@ -307,39 +368,60 @@ public class AzureKeyVaultCryptographicOperations : ICryptographicOperations
         }
     }
 
-    private static SignatureAlgorithm MapSignatureAlgorithm(SignatureAlgorithm algorithm, KeyType keyType)
+    private static AzureSignatureAlgorithm MapSignatureAlgorithm(SigningParameters parameters, KeyType keyType)
     {
-        return keyType switch
+        if (keyType == KeyType.Rsa || keyType == KeyType.RsaHsm)
         {
-            KeyType.Rsa or KeyType.RsaHsm => algorithm switch
+            var paddingScheme = parameters.RsaParams?.PaddingScheme ?? RSAPaddingScheme.RsaPaddingPkcs1;
+            
+            if (paddingScheme == RSAPaddingScheme.RsaPaddingPkcs1)
             {
-                V1.SignatureAlgorithm.RsaPkcs1Sha256 => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.RS256,
-                V1.SignatureAlgorithm.RsaPkcs1Sha384 => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.RS384,
-                V1.SignatureAlgorithm.RsaPkcs1Sha512 => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.RS512,
-                V1.SignatureAlgorithm.RsaPssSha256 => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.PS256,
-                V1.SignatureAlgorithm.RsaPssSha384 => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.PS384,
-                V1.SignatureAlgorithm.RsaPssSha512 => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.PS512,
-                _ => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.RS256
-            },
-            KeyType.Ec or KeyType.EcHsm => algorithm switch
+                return parameters.HashAlgorithm switch
+                {
+                    HashAlgorithm.Sha256 => AzureSignatureAlgorithm.RS256,
+                    HashAlgorithm.Sha384 => AzureSignatureAlgorithm.RS384,
+                    HashAlgorithm.Sha512 => AzureSignatureAlgorithm.RS512,
+                    _ => AzureSignatureAlgorithm.RS256
+                };
+            }
+            else if (paddingScheme == RSAPaddingScheme.RsaPaddingPss)
             {
-                V1.SignatureAlgorithm.EcdsaSha256 => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.ES256,
-                V1.SignatureAlgorithm.EcdsaSha384 => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.ES384,
-                V1.SignatureAlgorithm.EcdsaSha512 => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.ES512,
-                _ => Azure.Security.KeyVault.Keys.Cryptography.SignatureAlgorithm.ES256
-            },
-            _ => throw new ArgumentException($"Unsupported key type for signing: {keyType}")
-        };
+                return parameters.HashAlgorithm switch
+                {
+                    HashAlgorithm.Sha256 => AzureSignatureAlgorithm.PS256,
+                    HashAlgorithm.Sha384 => AzureSignatureAlgorithm.PS384,
+                    HashAlgorithm.Sha512 => AzureSignatureAlgorithm.PS512,
+                    _ => AzureSignatureAlgorithm.PS256
+                };
+            }
+            
+            return AzureSignatureAlgorithm.RS256;
+        }
+        else if (keyType == KeyType.Ec || keyType == KeyType.EcHsm)
+        {
+            return parameters.HashAlgorithm switch
+            {
+                HashAlgorithm.Sha256 => AzureSignatureAlgorithm.ES256,
+                HashAlgorithm.Sha384 => AzureSignatureAlgorithm.ES384,
+                HashAlgorithm.Sha512 => AzureSignatureAlgorithm.ES512,
+                _ => AzureSignatureAlgorithm.ES256
+            };
+        }
+        
+        throw new ArgumentException($"Unsupported key type for signing: {keyType}");
     }
 
-    private static EncryptionAlgorithm MapEncryptionAlgorithm(EncryptionAlgorithm algorithm)
+    private static AzureEncryptionAlgorithm MapEncryptionAlgorithm(EncryptionParameters parameters)
     {
-        return algorithm switch
+        return parameters.RsaParams?.PaddingScheme switch
         {
-            V1.EncryptionAlgorithm.RsaOaepSha1 => Azure.Security.KeyVault.Keys.Cryptography.EncryptionAlgorithm.RsaOaep,
-            V1.EncryptionAlgorithm.RsaOaepSha256 => Azure.Security.KeyVault.Keys.Cryptography.EncryptionAlgorithm.RsaOaep256,
-            V1.EncryptionAlgorithm.RsaPkcs1 => Azure.Security.KeyVault.Keys.Cryptography.EncryptionAlgorithm.Rsa15,
-            _ => Azure.Security.KeyVault.Keys.Cryptography.EncryptionAlgorithm.RsaOaep256
+            RSAPaddingScheme.RsaPaddingOaep => parameters.RsaParams.OaepHash switch
+            {
+                HashAlgorithm.Sha256 => AzureEncryptionAlgorithm.RsaOaep256,
+                _ => AzureEncryptionAlgorithm.RsaOaep
+            },
+            RSAPaddingScheme.RsaPaddingPkcs1 => AzureEncryptionAlgorithm.Rsa15,
+            _ => AzureEncryptionAlgorithm.RsaOaep256
         };
     }
 }

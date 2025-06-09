@@ -2,6 +2,7 @@ using Azure;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Polly.CircuitBreaker;
 using Supacrypt.Backend.Services.Azure;
+using System.Linq;
 
 namespace Supacrypt.Backend.Configuration;
 
@@ -39,7 +40,11 @@ public class KeyVaultHealthCheck : IHealthCheck
             await pipeline.ExecuteAsync(async (ct) =>
             {
                 var properties = client.GetPropertiesOfKeysAsync(cancellationToken: ct);
-                await properties.AsPages().FirstAsync(cancellationToken: ct);
+                await foreach (var page in properties.AsPages().WithCancellation(ct))
+                {
+                    // Just check if we can get the first page successfully
+                    break;
+                }
                 return Task.FromResult<object?>(null);
             }, timeoutCts.Token);
 

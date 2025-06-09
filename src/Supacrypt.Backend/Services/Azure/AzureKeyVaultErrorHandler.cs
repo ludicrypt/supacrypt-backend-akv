@@ -15,10 +15,10 @@ public static class AzureKeyVaultErrorHandler
             RequestFailedException azureEx => MapRequestFailedException(azureEx, keyId, operation),
             BrokenCircuitException circuitEx => MapCircuitBreakerException(circuitEx, keyId, operation),
             TaskCanceledException or OperationCanceledException => 
-                new CryptographicOperationException(ErrorCode.Timeout, "Operation timed out", keyId, operation, exception),
+                new CryptographicOperationException(ErrorCode.Timeout, "Operation timed out", keyId, operation, exception.Message),
             KeyNotFoundException => exception,
             InvalidOperationException => exception,
-            _ => new CryptographicOperationException(ErrorCode.InternalError, "An unexpected error occurred", keyId, operation, exception)
+            _ => new CryptographicOperationException(ErrorCode.InternalError, "An unexpected error occurred", keyId, operation, exception.Message)
         };
     }
 
@@ -39,10 +39,10 @@ public static class AzureKeyVaultErrorHandler
         return operation switch
         {
             "generate" or "delete" or "list" or "get" => 
-                new KeyManagementException(errorCode, message, keyId, azureException),
+                new KeyManagementException(errorCode, message, keyId, azureException.Message),
             "sign" or "verify" or "encrypt" or "decrypt" => 
-                new CryptographicOperationException(errorCode, message, keyId, operation, azureException),
-            _ => new CryptographicOperationException(errorCode, message, keyId, operation, azureException)
+                new CryptographicOperationException(errorCode, message, keyId, operation, azureException.Message),
+            _ => new CryptographicOperationException(errorCode, message, keyId, operation, azureException.Message)
         };
     }
 
@@ -53,10 +53,10 @@ public static class AzureKeyVaultErrorHandler
         return operation switch
         {
             "generate" or "delete" or "list" or "get" => 
-                new KeyManagementException(ErrorCode.ServiceUnavailable, message, keyId, circuitException),
+                new KeyManagementException(ErrorCode.ServiceUnavailable, message, keyId, circuitException.Message),
             "sign" or "verify" or "encrypt" or "decrypt" => 
-                new CryptographicOperationException(ErrorCode.ServiceUnavailable, message, keyId, operation, circuitException),
-            _ => new CryptographicOperationException(ErrorCode.ServiceUnavailable, message, keyId, operation, circuitException)
+                new CryptographicOperationException(ErrorCode.ServiceUnavailable, message, keyId, operation, circuitException.Message),
+            _ => new CryptographicOperationException(ErrorCode.ServiceUnavailable, message, keyId, operation, circuitException.Message)
         };
     }
 

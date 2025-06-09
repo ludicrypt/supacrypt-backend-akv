@@ -147,7 +147,7 @@ public class CertificateValidationService : ICertificateValidationService
         return false;
     }
 
-    private async Task<List<string>> ValidateCertificateChainAsync(X509Certificate2 certificate)
+    private Task<List<string>> ValidateCertificateChainAsync(X509Certificate2 certificate)
     {
         var errors = new List<string>();
 
@@ -173,10 +173,10 @@ public class CertificateValidationService : ICertificateValidationService
             errors.Add($"Chain validation exception: {ex.Message}");
         }
 
-        return errors;
+        return Task.FromResult(errors);
     }
 
-    private async Task<List<string>> CheckCertificateRevocationAsync(X509Certificate2 certificate)
+    private Task<List<string>> CheckCertificateRevocationAsync(X509Certificate2 certificate)
     {
         var errors = new List<string>();
 
@@ -212,7 +212,7 @@ public class CertificateValidationService : ICertificateValidationService
             errors.Add($"Revocation check exception: {ex.Message}");
         }
 
-        return errors;
+        return Task.FromResult(errors);
     }
 
     private static void ExtractClaimsFromCertificate(X509Certificate2 certificate, CertificateValidationResult result)

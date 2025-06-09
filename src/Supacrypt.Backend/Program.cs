@@ -1,6 +1,7 @@
 using Serilog;
 using Microsoft.AspNetCore.Authentication.Certificate;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.Options;
 using Supacrypt.Backend.Configuration;
 using Supacrypt.Backend.Extensions;

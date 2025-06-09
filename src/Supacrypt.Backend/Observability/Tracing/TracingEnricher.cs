@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Http;
 using Grpc.Core;
+using OpenTelemetry.Trace;
 
 namespace Supacrypt.Backend.Observability.Tracing;
 

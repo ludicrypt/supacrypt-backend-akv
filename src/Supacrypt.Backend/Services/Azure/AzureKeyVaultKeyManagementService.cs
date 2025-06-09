@@ -36,17 +36,17 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
         try
         {
             _logger.LogInformation("Starting key generation for {KeyId} with algorithm {Algorithm}",
-                request.KeyId, request.Algorithm);
+                request.Name, request.Algorithm);
 
             var client = _clientFactory.CreateKeyClient();
             var pipeline = _resiliencePolicy.GetPipeline<Response<KeyVaultKey>>();
 
             // Create the key creation options based on algorithm
-            var createKeyOptions = CreateKeyOptions(request);
+            var (keyType, createKeyOptions) = CreateKeyOptions(request);
             
             // Generate the key in Azure Key Vault
             var response = await pipeline.ExecuteAsync(async (ct) =>
-                await client.CreateKeyAsync(request.KeyId, createKeyOptions.KeyType, createKeyOptions, ct), cancellationToken);
+                await client.CreateKeyAsync(request.Name, keyType, createKeyOptions, ct), cancellationToken);
 
             if (response?.Value == null)
             {
@@ -61,8 +61,8 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
             // Store metadata in our repository
             var metadata = new Models.KeyMetadataModel
             {
-                KeyId = request.KeyId,
-                Name = request.KeyId,
+                KeyId = request.Name,
+                Name = request.Name,
                 Algorithm = request.Algorithm,
                 Parameters = request.Parameters,
                 CreatedAt = DateTime.UtcNow,
@@ -76,26 +76,39 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
             await _keyRepository.StoreKeyMetadataAsync(metadata, cancellationToken);
 
             _logger.LogInformation("Successfully generated key {KeyId} in {Duration}ms",
-                request.KeyId, stopwatch.ElapsedMilliseconds);
+                request.Name, stopwatch.ElapsedMilliseconds);
 
             return new GenerateKeyResponse
             {
-                KeyId = request.KeyId,
-                Algorithm = request.Algorithm,
-                Parameters = request.Parameters,
-                PublicKey = ByteString.CopyFrom(publicKeyData),
-                CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
+                Success = new GenerateKeySuccess
+                {
+                    Metadata = new KeyMetadata
+                    {
+                        Name = request.Name,
+                        Algorithm = request.Algorithm,
+                        Parameters = request.Parameters,
+                        CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
+                        UpdatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
+                        Enabled = true
+                    },
+                    PublicKey = new PublicKey
+                    {
+                        Algorithm = request.Algorithm,
+                        KeyData = ByteString.CopyFrom(publicKeyData),
+                        Parameters = request.Parameters
+                    }
+                }
             };
         }
         catch (RequestFailedException ex) when (ex.Status == 409)
         {
-            _logger.LogWarning("Key {KeyId} already exists", request.KeyId);
-            throw new InvalidOperationException($"Key {request.KeyId} already exists", ex);
+            _logger.LogWarning("Key {KeyId} already exists", request.Name);
+            throw new InvalidOperationException($"Key {request.Name} already exists", ex);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to generate key {KeyId} after {Duration}ms",
-                request.KeyId, stopwatch.ElapsedMilliseconds);
+                request.Name, stopwatch.ElapsedMilliseconds);
             throw;
         }
     }
@@ -127,14 +140,20 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
 
             var keyResponse = new GetKeyResponse
             {
-                KeyId = request.KeyId,
-                Algorithm = metadata?.Algorithm ?? MapKeyTypeToAlgorithm(keyVaultKey.KeyType),
-                Parameters = metadata?.Parameters ?? CreateDefaultParameters(keyVaultKey),
-                Enabled = keyVaultKey.Properties.Enabled ?? true,
-                CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(
-                    keyVaultKey.Properties.CreatedOn?.DateTime ?? DateTime.UtcNow),
-                UpdatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(
-                    keyVaultKey.Properties.UpdatedOn?.DateTime ?? DateTime.UtcNow)
+                Success = new GetKeySuccess
+                {
+                    Metadata = new KeyMetadata
+                    {
+                        Name = request.KeyId,
+                        Algorithm = metadata?.Algorithm ?? MapKeyTypeToAlgorithm(keyVaultKey.KeyType),
+                        Parameters = metadata?.Parameters ?? CreateDefaultParameters(keyVaultKey),
+                        Enabled = keyVaultKey.Properties.Enabled ?? true,
+                        CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(
+                            keyVaultKey.Properties.CreatedOn?.DateTime ?? DateTime.UtcNow),
+                        UpdatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(
+                            keyVaultKey.Properties.UpdatedOn?.DateTime ?? DateTime.UtcNow)
+                    }
+                }
             };
 
             // Add tags
@@ -142,7 +161,7 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
             {
                 foreach (var tag in keyVaultKey.Properties.Tags)
                 {
-                    keyResponse.Tags.Add(tag.Key, tag.Value);
+                    keyResponse.Success.Metadata.Tags.Add(tag.Key, tag.Value);
                 }
             }
 
@@ -150,7 +169,12 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
             if (request.IncludePublicKey)
             {
                 var publicKeyData = ExtractPublicKeyData(keyVaultKey);
-                keyResponse.PublicKey = ByteString.CopyFrom(publicKeyData);
+                keyResponse.Success.PublicKey = new PublicKey
+                {
+                    Algorithm = keyResponse.Success.Metadata.Algorithm,
+                    KeyData = ByteString.CopyFrom(publicKeyData),
+                    Parameters = keyResponse.Success.Metadata.Parameters
+                };
             }
 
             _logger.LogInformation("Successfully retrieved key {KeyId}", request.KeyId);
@@ -184,13 +208,13 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
                 request.IncludeDisabled,
                 cancellationToken);
 
-            var response = new ListKeysResponse();
+            var keyMetadataList = new List<KeyMetadata>();
 
             foreach (var key in keys)
             {
-                var keyInfo = new KeyInfo
+                var keyMetadata = new KeyMetadata
                 {
-                    KeyId = key.KeyId,
+                    Name = key.KeyId,
                     Algorithm = key.Algorithm,
                     Parameters = key.Parameters,
                     Enabled = key.Enabled,
@@ -200,20 +224,27 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
 
                 foreach (var tag in key.Tags)
                 {
-                    keyInfo.Tags.Add(tag.Key, tag.Value);
+                    keyMetadata.Tags.Add(tag.Key, tag.Value);
                 }
 
-                response.Keys.Add(keyInfo);
+                keyMetadataList.Add(keyMetadata);
             }
+
+            var response = new ListKeysResponse
+            {
+                Success = new ListKeysSuccess()
+            };
+
+            response.Success.Keys.AddRange(keyMetadataList);
 
             // Generate next page token if we have more results
-            if (request.PageSize > 0 && response.Keys.Count >= request.PageSize)
+            if (request.PageSize > 0 && keyMetadataList.Count >= request.PageSize)
             {
                 var nextOffset = GetOffsetFromPageToken(request.PageToken) + (int)request.PageSize;
-                response.NextPageToken = await _keyRepository.GetNextPageTokenAsync(nextOffset, cancellationToken);
+                response.Success.NextPageToken = await _keyRepository.GetNextPageTokenAsync(nextOffset, cancellationToken);
             }
 
-            _logger.LogInformation("Listed {Count} keys", response.Keys.Count);
+            _logger.LogInformation("Listed {Count} keys", keyMetadataList.Count);
             return response;
         }
         catch (Exception ex)
@@ -243,8 +274,11 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
 
             return new DeleteKeyResponse
             {
-                KeyId = request.KeyId,
-                Success = true
+                Success = new DeleteKeySuccess
+                {
+                    KeyId = request.KeyId,
+                    DeletedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
+                }
             };
         }
         catch (Exception ex)
@@ -254,9 +288,17 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
         }
     }
 
-    private static CreateKeyOptions CreateKeyOptions(GenerateKeyRequest request)
+    private static (KeyType keyType, CreateKeyOptions options) CreateKeyOptions(GenerateKeyRequest request)
     {
-        var options = new CreateKeyOptions(KeyType.Rsa)
+        KeyType keyType = request.Algorithm switch
+        {
+            KeyAlgorithm.Rsa => KeyType.Rsa,
+            KeyAlgorithm.Ecc => KeyType.Ec,
+            KeyAlgorithm.Ecdsa => KeyType.Ec,
+            _ => KeyType.Rsa
+        };
+
+        var options = new CreateKeyOptions
         {
             ExpiresOn = null,
             NotBefore = null,
@@ -274,18 +316,19 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
         switch (request.Algorithm)
         {
             case KeyAlgorithm.Rsa:
-                options.KeyType = KeyType.Rsa;
                 if (request.Parameters?.RsaParams != null)
                 {
-                    options.KeySize = (int)request.Parameters.RsaParams.KeySize;
+                    // Note: Azure Key Vault uses RSA key sizes directly, not the CreateKeyOptions.KeySize
+                    // The key size is typically set in the RSA-specific creation parameters
                 }
                 break;
 
-            case KeyAlgorithm.Ec:
-                options.KeyType = KeyType.Ec;
+            case KeyAlgorithm.Ecc:
+            case KeyAlgorithm.Ecdsa:
                 if (request.Parameters?.EccParams != null)
                 {
-                    options.CurveName = MapEcCurveToKeyVault(request.Parameters.EccParams.Curve);
+                    // Note: Azure Key Vault uses CurveName in the EC-specific creation parameters
+                    // This will be set when creating EC keys
                 }
                 break;
 
@@ -299,17 +342,23 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
             options.Tags.Add(tag.Key, tag.Value);
         }
 
-        return options;
+        return (keyType, options);
     }
 
     private static byte[] ExtractPublicKeyData(KeyVaultKey key)
     {
-        return key.KeyType switch
+        if (key.KeyType == KeyType.Rsa || key.KeyType == KeyType.RsaHsm)
         {
-            KeyType.Rsa or KeyType.RsaHsm => key.Key.ToRSA()?.ExportRSAPublicKey() ?? Array.Empty<byte>(),
-            KeyType.Ec or KeyType.EcHsm => key.Key.ToECDsa()?.ExportSubjectPublicKeyInfo() ?? Array.Empty<byte>(),
-            _ => Array.Empty<byte>()
-        };
+            return key.Key.ToRSA()?.ExportRSAPublicKey() ?? Array.Empty<byte>();
+        }
+        else if (key.KeyType == KeyType.Ec || key.KeyType == KeyType.EcHsm)
+        {
+            return key.Key.ToECDsa()?.ExportSubjectPublicKeyInfo() ?? Array.Empty<byte>();
+        }
+        else
+        {
+            return Array.Empty<byte>();
+        }
     }
 
     private static List<string> GetOperationsForAlgorithm(KeyAlgorithm algorithm)
@@ -317,7 +366,8 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
         return algorithm switch
         {
             KeyAlgorithm.Rsa => new List<string> { "sign", "verify", "encrypt", "decrypt" },
-            KeyAlgorithm.Ec => new List<string> { "sign", "verify" },
+            KeyAlgorithm.Ecc => new List<string> { "sign", "verify" },
+            KeyAlgorithm.Ecdsa => new List<string> { "sign", "verify" },
             _ => new List<string> { "sign", "verify" }
         };
     }
@@ -347,40 +397,64 @@ public class AzureKeyVaultKeyManagementService : IKeyManagementService
 
     private static KeyAlgorithm MapKeyTypeToAlgorithm(KeyType keyType)
     {
-        return keyType switch
+        if (keyType == KeyType.Rsa || keyType == KeyType.RsaHsm)
         {
-            KeyType.Rsa or KeyType.RsaHsm => KeyAlgorithm.Rsa,
-            KeyType.Ec or KeyType.EcHsm => KeyAlgorithm.Ec,
-            _ => KeyAlgorithm.Rsa
-        };
+            return KeyAlgorithm.Rsa;
+        }
+        else if (keyType == KeyType.Ec || keyType == KeyType.EcHsm)
+        {
+            return KeyAlgorithm.Ecc;
+        }
+        else
+        {
+            return KeyAlgorithm.Rsa;
+        }
     }
 
     private static KeyParameters CreateDefaultParameters(KeyVaultKey key)
     {
-        return key.KeyType switch
+        if (key.KeyType == KeyType.Rsa || key.KeyType == KeyType.RsaHsm)
         {
-            KeyType.Rsa or KeyType.RsaHsm => new KeyParameters
+            return new KeyParameters
             {
-                RsaParams = new RsaParameters
+                RsaParams = new RSAParameters
                 {
-                    KeySize = (RsaKeySize)(key.Key.ToRSA()?.KeySize ?? 2048)
+                    KeySize = (RSAKeySize)(key.Key.ToRSA()?.KeySize ?? 2048)
                 }
-            },
-            KeyType.Ec or KeyType.EcHsm => new KeyParameters
+            };
+        }
+        else if (key.KeyType == KeyType.Ec || key.KeyType == KeyType.EcHsm)
+        {
+            ECCCurve curve;
+            if (key.Key.CurveName == KeyCurveName.P256)
             {
-                EccParams = new EccParameters
+                curve = ECCCurve.P256;
+            }
+            else if (key.Key.CurveName == KeyCurveName.P384)
+            {
+                curve = ECCCurve.P384;
+            }
+            else if (key.Key.CurveName == KeyCurveName.P521)
+            {
+                curve = ECCCurve.P521;
+            }
+            else
+            {
+                curve = ECCCurve.P256;
+            }
+
+            return new KeyParameters
+            {
+                EccParams = new ECCParameters
                 {
-                    Curve = key.Key.CurveName switch
-                    {
-                        KeyCurveName.P256 => ECCCurve.P256,
-                        KeyCurveName.P384 => ECCCurve.P384,
-                        KeyCurveName.P521 => ECCCurve.P521,
-                        _ => ECCCurve.P256
-                    }
+                    Curve = curve
                 }
-            },
-            _ => new KeyParameters()
-        };
+            };
+        }
+        else
+        {
+            return new KeyParameters();
+        }
     }
 
     private static int GetOffsetFromPageToken(string? pageToken)

@@ -1,6 +1,7 @@
 using System.Security.Cryptography.X509Certificates;
 using Azure.Identity;
 using Azure.Security.KeyVault.Certificates;
+using Azure.Security.KeyVault.Secrets;
 using Supacrypt.Backend.Configuration;
 using Supacrypt.Backend.Exceptions;
 
@@ -37,7 +38,7 @@ public class CertificateLoader : ICertificateLoader
         }
     }
 
-    public async Task<X509Certificate2> LoadCertificateFromFileAsync(string path, string? password)
+    public Task<X509Certificate2> LoadCertificateFromFileAsync(string path, string? password)
     {
         try
         {
@@ -54,15 +55,15 @@ public class CertificateLoader : ICertificateLoader
             _logger.LogInformation("Loading certificate from file: {Path}", path);
 
             var certificate = string.IsNullOrEmpty(password)
-                ? new X509Certificate2(path)
-                : new X509Certificate2(path, password);
+                ? X509CertificateLoader.LoadCertificateFromFile(path)
+                : X509CertificateLoader.LoadPkcs12FromFile(path, password);
 
             ValidateCertificate(certificate);
             
             _logger.LogInformation("Successfully loaded certificate from file. Subject: {Subject}, Thumbprint: {Thumbprint}",
                 certificate.Subject, certificate.Thumbprint);
 
-            return certificate;
+            return Task.FromResult(certificate);
         }
         catch (Exception ex)
         {
@@ -71,7 +72,7 @@ public class CertificateLoader : ICertificateLoader
         }
     }
 
-    public async Task<X509Certificate2> LoadCertificateFromStoreAsync(string subject, StoreName storeName, StoreLocation storeLocation)
+    public Task<X509Certificate2> LoadCertificateFromStoreAsync(string subject, StoreName storeName, StoreLocation storeLocation)
     {
         try
         {
@@ -104,7 +105,7 @@ public class CertificateLoader : ICertificateLoader
             _logger.LogInformation("Successfully loaded certificate from store. Subject: {Subject}, Thumbprint: {Thumbprint}",
                 certificate.Subject, certificate.Thumbprint);
 
-            return certificate;
+            return Task.FromResult(certificate);
         }
         catch (Exception ex)
         {
@@ -138,12 +139,12 @@ public class CertificateLoader : ICertificateLoader
             var certificate = certificateWithPolicy.Value;
 
             // Download the certificate with private key
-            var secretClient = new Azure.Security.KeyVault.Secrets.SecretClient(new Uri(vaultUri), new DefaultAzureCredential());
+            var secretClient = new SecretClient(new Uri(vaultUri), new DefaultAzureCredential());
             var secret = await secretClient.GetSecretAsync(certificateName);
 
             // Convert the secret value (Base64 encoded PFX) to X509Certificate2
             var pfxBytes = Convert.FromBase64String(secret.Value.Value);
-            var x509Certificate = new X509Certificate2(pfxBytes, (string?)null, X509KeyStorageFlags.MachineKeySet | X509KeyStorageFlags.PersistKeySet);
+            var x509Certificate = X509CertificateLoader.LoadPkcs12(pfxBytes, null);
 
             ValidateCertificate(x509Certificate);
 

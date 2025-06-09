@@ -137,24 +137,24 @@ public class SystemMetrics : IHostedService, IDisposable
     {
         // Working set memory
         var workingSet = _currentProcess.WorkingSet64;
-        _memoryUsage.Add(workingSet, new TagList { ["type"] = "working_set" });
+        _memoryUsage.Add(workingSet, new TagList { { "type", "working_set" } });
 
         // Private memory
         var privateMemory = _currentProcess.PrivateMemorySize64;
-        _memoryUsage.Add(privateMemory, new TagList { ["type"] = "private" });
+        _memoryUsage.Add(privateMemory, new TagList { { "type", "private" } });
 
         // Virtual memory
         var virtualMemory = _currentProcess.VirtualMemorySize64;
-        _memoryUsage.Add(virtualMemory, new TagList { ["type"] = "virtual" });
+        _memoryUsage.Add(virtualMemory, new TagList { { "type", "virtual" } });
 
         // Managed memory
         var managedMemory = GC.GetTotalMemory(false);
-        _memoryUsage.Add(managedMemory, new TagList { ["type"] = "managed" });
+        _memoryUsage.Add(managedMemory, new TagList { { "type", "managed" } });
 
         // Available memory (approximation)
         var gcInfo = GC.GetGCMemoryInfo();
         var totalAvailableMemory = gcInfo.TotalAvailableMemoryBytes;
-        _memoryUsage.Add(totalAvailableMemory, new TagList { ["type"] = "total_available" });
+        _memoryUsage.Add(totalAvailableMemory, new TagList { { "type", "total_available" } });
     }
 
     private void CollectProcessMetrics()
@@ -207,8 +207,8 @@ public class SystemMetrics : IHostedService, IDisposable
     {
         var tags = new TagList
         {
-            ["check_name"] = checkName,
-            ["status"] = status
+            { "check_name", checkName },
+            { "status", status }
         };
 
         if (details != null)
@@ -228,7 +228,7 @@ public class SystemMetrics : IHostedService, IDisposable
             description: "Current health check status (1=healthy, 0=unhealthy)");
 
         var statusValue = status.ToLowerInvariant() == "healthy" ? 1 : 0;
-        healthStatus.Add(statusValue, new TagList { ["check_name"] = checkName });
+        healthStatus.Add(statusValue, new TagList { { "check_name", checkName } });
     }
 
     public void RecordComponentHealth(string componentName, bool isHealthy, string? details = null)
@@ -239,8 +239,8 @@ public class SystemMetrics : IHostedService, IDisposable
 
         var tags = new TagList
         {
-            ["component"] = componentName,
-            ["status"] = isHealthy ? "healthy" : "unhealthy"
+            { "component", componentName },
+            { "status", isHealthy ? "healthy" : "unhealthy" }
         };
 
         if (!string.IsNullOrEmpty(details))
@@ -256,9 +256,9 @@ public class SystemMetrics : IHostedService, IDisposable
     {
         var tags = new TagList
         {
-            ["certificate_subject"] = SanitizeCertificateSubject(certificateSubject),
-            ["expires_at"] = expirationDate.ToString("yyyy-MM-dd"),
-            ["days_until_expiration"] = (int)timeUntilExpiration.TotalDays
+            { "certificate_subject", SanitizeCertificateSubject(certificateSubject) },
+            { "expires_at", expirationDate.ToString("yyyy-MM-dd") },
+            { "days_until_expiration", (int)timeUntilExpiration.TotalDays }
         };
 
         // Record certificate expiration metric
@@ -280,8 +280,8 @@ public class SystemMetrics : IHostedService, IDisposable
     {
         var tags = new TagList
         {
-            ["generation"] = generation,
-            ["memory_reclaimed"] = memoryBefore - memoryAfter
+            { "generation", generation },
+            { "memory_reclaimed", memoryBefore - memoryAfter }
         };
 
         _gcDuration.Record(duration.TotalMilliseconds, tags);
