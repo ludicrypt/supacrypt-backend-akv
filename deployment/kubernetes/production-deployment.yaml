@@ -1,0 +1,387 @@
+# Supacrypt Production Kubernetes Deployment
+# This manifest deploys the production-ready Supacrypt backend service
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: supacrypt
+  labels:
+    name: supacrypt
+    environment: production
+
+---
+# ConfigMap for application configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: supacrypt-config
+  namespace: supacrypt
+data:
+  appsettings.Production.json: |
+    {
+      "Logging": {
+        "LogLevel": {
+          "Default": "Information",
+          "Microsoft.AspNetCore": "Warning",
+          "Microsoft.Hosting.Lifetime": "Information"
+        }
+      },
+      "AzureKeyVault": {
+        "VaultUrl": "${AZURE_KEY_VAULT_URL}",
+        "UseManagedIdentity": true,
+        "TenantId": "${AZURE_TENANT_ID}"
+      },
+      "Security": {
+        "RequireClientCertificate": true,
+        "AllowedCertificateThumbprints": [],
+        "CertificateValidation": {
+          "ValidateChain": true,
+          "ValidateIssuer": true,
+          "ValidateExpiration": true
+        }
+      },
+      "Observability": {
+        "EnableMetrics": true,
+        "EnableTracing": true,
+        "EnableHealthChecks": true,
+        "MetricsPath": "/metrics",
+        "HealthCheckPath": "/health"
+      },
+      "gRPC": {
+        "MaxReceiveMessageSize": 4194304,
+        "MaxSendMessageSize": 4194304,
+        "EnableReflection": false,
+        "Interceptors": {
+          "EnableLogging": true,
+          "EnableMetrics": true,
+          "EnableTracing": true
+        }
+      }
+    }
+
+---
+# Secret for TLS certificates
+apiVersion: v1
+kind: Secret
+metadata:
+  name: supacrypt-tls
+  namespace: supacrypt
+type: kubernetes.io/tls
+data:
+  # These should be base64 encoded certificate and key
+  # Replace with actual production certificates
+  tls.crt: LS0tLS1CRUdJTi... # Base64 encoded certificate
+  tls.key: LS0tLS1CRUdJTi... # Base64 encoded private key
+
+---
+# Service Account with Azure Workload Identity
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: supacrypt-sa
+  namespace: supacrypt
+  annotations:
+    azure.workload.identity/client-id: "${AZURE_CLIENT_ID}"
+  labels:
+    azure.workload.identity/use: "true"
+
+---
+# Deployment for Supacrypt Backend Service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: supacrypt-backend
+  namespace: supacrypt
+  labels:
+    app: supacrypt-backend
+    version: v1.0.0
+    component: backend
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: supacrypt-backend
+  template:
+    metadata:
+      labels:
+        app: supacrypt-backend
+        version: v1.0.0
+        component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: supacrypt-sa
+      containers:
+      - name: supacrypt-backend
+        image: supacrypt/backend:1.0.0  # Replace with actual image
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 5000
+          protocol: TCP
+        - name: https
+          containerPort: 5001
+          protocol: TCP
+        - name: grpc
+          containerPort: 5051
+          protocol: TCP
+        env:
+        - name: ASPNETCORE_ENVIRONMENT
+          value: "Production"
+        - name: ASPNETCORE_URLS
+          value: "https://+:5001;http://+:5000"
+        - name: AZURE_KEY_VAULT_URL
+          valueFrom:
+            secretKeyRef:
+              name: supacrypt-secrets
+              key: azure-key-vault-url
+        - name: AZURE_TENANT_ID
+          valueFrom:
+            secretKeyRef:
+              name: supacrypt-secrets
+              key: azure-tenant-id
+        - name: AZURE_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: supacrypt-secrets
+              key: azure-client-id
+        volumeMounts:
+        - name: config
+          mountPath: /app/appsettings.Production.json
+          subPath: appsettings.Production.json
+          readOnly: true
+        - name: tls-certs
+          mountPath: /app/certs
+          readOnly: true
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 5000
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 5000
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 30
+        securityContext:
+          allowPrivilegeEscalation: false
+          runAsNonRoot: true
+          runAsUser: 10001
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+      volumes:
+      - name: config
+        configMap:
+          name: supacrypt-config
+      - name: tls-certs
+        secret:
+          secretName: supacrypt-tls
+      securityContext:
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - supacrypt-backend
+              topologyKey: kubernetes.io/hostname
+
+---
+# Service for Supacrypt Backend
+apiVersion: v1
+kind: Service
+metadata:
+  name: supacrypt-backend-service
+  namespace: supacrypt
+  labels:
+    app: supacrypt-backend
+    component: backend
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+spec:
+  type: LoadBalancer
+  ports:
+  - name: http
+    port: 80
+    targetPort: 5000
+    protocol: TCP
+  - name: https
+    port: 443
+    targetPort: 5001
+    protocol: TCP
+  - name: grpc
+    port: 5051
+    targetPort: 5051
+    protocol: TCP
+  selector:
+    app: supacrypt-backend
+
+---
+# Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: supacrypt-backend-hpa
+  namespace: supacrypt
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: supacrypt-backend
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 15
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+
+---
+# Pod Disruption Budget
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: supacrypt-backend-pdb
+  namespace: supacrypt
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: supacrypt-backend
+
+---
+# Network Policy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: supacrypt-backend-netpol
+  namespace: supacrypt
+spec:
+  podSelector:
+    matchLabels:
+      app: supacrypt-backend
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 5000
+    - protocol: TCP
+      port: 5001
+    - protocol: TCP
+      port: 5051
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS for Azure Key Vault
+    - protocol: TCP
+      port: 53   # DNS
+    - protocol: UDP
+      port: 53   # DNS
+
+---
+# ServiceMonitor for Prometheus monitoring
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: supacrypt-backend-monitor
+  namespace: supacrypt
+  labels:
+    app: supacrypt-backend
+    component: backend
+spec:
+  selector:
+    matchLabels:
+      app: supacrypt-backend
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+
+---
+# Secret for Azure credentials (to be created separately)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: supacrypt-secrets
+  namespace: supacrypt
+type: Opaque
+stringData:
+  azure-key-vault-url: "https://your-keyvault.vault.azure.net/"
+  azure-tenant-id: "your-tenant-id"
+  azure-client-id: "your-client-id"
+  # Note: In production, use Azure Workload Identity instead of client secrets
